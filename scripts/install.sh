@@ -144,7 +144,13 @@ else
     log "WARN: Please build manually: cargo build --release && cp target/release/lantern $LANTERN_BIN/"
 fi
 
-# Copy helper scripts
+# Copy helper scripts. rm -f each destination FIRST: a stale symlink left by a
+# prior launcher (e.g. ~/.lantern/bin/startwork → DevEnvironment/workbench-up.py)
+# would otherwise be FOLLOWED by cp, writing through to the wrong target instead
+# of replacing the command. Shims must be real files in $LANTERN_BIN.
+for dest in lantern-up lantern-down lantern-doctor lantern-install lantern-setup-iterm startwork stopwork; do
+    rm -f "$LANTERN_BIN/$dest"
+done
 cp "$SCRIPT_DIR/lantern-up.sh" "$LANTERN_BIN/lantern-up"
 cp "$SCRIPT_DIR/lantern-down.sh" "$LANTERN_BIN/lantern-down"
 cp "$SCRIPT_DIR/lantern-doctor.sh" "$LANTERN_BIN/lantern-doctor"

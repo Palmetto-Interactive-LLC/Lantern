@@ -97,7 +97,7 @@ if [[ -f "$SOURCE_DIR/Cargo.toml" ]]; then
     # agent's MCP client. Any repo with a stray Cargo.toml must not qualify.
     if ! grep -Eq '^name[[:space:]]*=[[:space:]]*"lantern"' "$SOURCE_DIR/Cargo.toml"; then
         log "ERROR: $SOURCE_DIR/Cargo.toml is not the 'lantern' crate. Refusing to build."
-        log "ERROR: Run lantern-install from the canonical m7-lantern-code checkout."
+        log "ERROR: Run lantern-install from a pi-code-orchestrator checkout."
         exit 1
     fi
     log "INFO: Building lantern from source..."
@@ -127,25 +127,13 @@ if [[ -f "$SOURCE_DIR/Cargo.toml" ]]; then
     fi
     log "INFO: lantern binary installed to $LANTERN_BIN/lantern"
 
-    # iTerm2 Python helpers
-    for py in iterm_launch.py iterm_kimi_ready.py iterm_close.py iterm_set_titles.py iterm_batch_init.py; do
-        if [[ -f "$SOURCE_DIR/src/startwork/$py" ]]; then
-            cp "$SOURCE_DIR/src/startwork/$py" "$LANTERN_BIN/$py"
-            chmod +x "$LANTERN_BIN/$py"
-        fi
+    # iTerm2 Python helpers — copy every iterm_*.py the crate ships.
+    for py in "$SOURCE_DIR"/src/startwork/iterm_*.py; do
+        [[ -f "$py" ]] || continue
+        cp "$py" "$LANTERN_BIN/$(basename "$py")"
+        chmod +x "$LANTERN_BIN/$(basename "$py")"
     done
     log "INFO: iTerm2 Python helpers installed to $LANTERN_BIN"
-
-    # Pre-build devorch MCP client for instant Kimi stdio startup (~170ms vs tsx cold JIT).
-    DEVORCH_MCP_LINK="${HOME}/.local/bin/devorch-mcp-client"
-    if [[ -L "$DEVORCH_MCP_LINK" ]]; then
-        ORCH_ROOT="$(cd "$(dirname "$(readlink "$DEVORCH_MCP_LINK")")/.." && pwd)"
-        if [[ -f "$ORCH_ROOT/scripts/build-mcp-client.mjs" ]]; then
-            log "INFO: Building devorch MCP client bundle"
-            (cd "$ORCH_ROOT" && node scripts/build-mcp-client.mjs) || \
-                log "WARN: devorch MCP bundle build failed (Kimi will use tsx fallback)"
-        fi
-    fi
 
     if [[ "$OS" == "Darwin" && -x "$SCRIPT_DIR/setup-iterm.sh" ]]; then
         SOURCE_DIR="$SOURCE_DIR" LANTERN_HOME="$LANTERN_HOME" LANTERN_BIN="$LANTERN_BIN" \

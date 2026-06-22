@@ -8,15 +8,15 @@ Lantern combines three functions into one deployable unit:
 
 - **MCP server**: Serves tools (`devorch_report_status`, `devorch_peer_message`, `devorch_query_team_state`, `devorch_get_setup_instructions`) for agents to interact with the runtime
 - **Local runner**: Manages terminal windows (iTerm2), git worktrees, process execution, and recovery
-- **Temporal client**: Drives all runtime state through the local native Temporal instance (127.0.0.1:8243) with SQLite projections for diagnostics (Docker Temporal is strictly unsupported)
+- **Delivery**: Communication runs directly over iTerm2 injection keyed off SQLite state; SQLite is the single source of truth. An optional native Temporal instance (127.0.0.1:8243) may run for the relay/worker but is OFF the delivery path (Docker Temporal is strictly unsupported)
 
 No remote server dependency. Deploy on N machines, each runs independently.
 
 ## Quick start
 
 ```bash
-git clone https://github.com/Palmetto-Interactive-LLC/m7-lantern-code.git
-cd m7-lantern-code
+git clone https://github.com/Palmetto-Interactive-LLC/pi-code-orchestrator.git
+cd pi-code-orchestrator
 ./scripts/install.sh
 source ~/.zshrc
 
@@ -42,7 +42,6 @@ lantern startwork myproject 1 --agent claude
 - macOS with iTerm2
 - git, Rust 1.70+
 - Temporal CLI (used by local dev server)
-- `agent-runner` at `~/.local/bin/agent-runner`
 - An agent CLI (`claude`, `agy`, `codex`, or `kimi`)
 
 ## Development

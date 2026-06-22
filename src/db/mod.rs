@@ -15,12 +15,10 @@ pub async fn init_db(database_url: &str) -> anyhow::Result<SqlitePool> {
         sqlx::Sqlite::create_database(database_url).await?;
     }
 
-    // WAL lets the relay, `lantern status`, the MCP server, and the 9 per-pane
-    // agent-runners share this file (one writer + many readers). busy_timeout
-    // makes a blocked writer wait for the lock instead of failing with
-    // SQLITE_BUSY — explicit here so the multi-writer contract doesn't depend on
-    // a library default (the libsql adapter on the agent-runner side sets the
-    // same 5s timeout).
+    // WAL lets the relay, `lantern status`, and the MCP server share this file
+    // (one writer + many readers). busy_timeout makes a blocked writer wait for
+    // the lock instead of failing with SQLITE_BUSY — explicit here so the
+    // multi-writer contract doesn't depend on a library default.
     let options = SqliteConnectOptions::from_str(database_url)?
         .journal_mode(SqliteJournalMode::Wal)
         .synchronous(SqliteSynchronous::Normal)

@@ -6,7 +6,6 @@ use tokio::process::Command;
 use tracing::{error, info};
 
 use crate::config::Config;
-use crate::temporal::signals::{signal_cleanup_request, workflow_id_for_session_cleanup};
 
 #[derive(Default)]
 pub struct StopworkOptions {
@@ -143,13 +142,14 @@ pub async fn stop_all_sessions(
 
 pub async fn stop_session(
     pool: &SqlitePool,
-    config: &Config,
+    _config: &Config,
     session_id: &str,
     options: &StopworkOptions,
 ) -> Result<()> {
     println!("Stopping session '{}'...", session_id);
 
-    let session = crate::db::queries::get_session(pool, session_id)
+    // Verify the session exists before tearing anything down.
+    crate::db::queries::get_session(pool, session_id)
         .await?
         .context("session not found")?;
 
@@ -164,18 +164,6 @@ pub async fn stop_session(
             false
         }
     };
-
-    // Kill any active tmux sessions for all roles
-    let roles = [
-        "orch", "input", "ai", "dat", "sec", "ops", "plt", "ui", "doc", "qa",
-    ];
-    for role in roles {
-        let tmux_session = format!("devorch_{}_{}", role, session_id);
-        let _ = Command::new("tmux")
-            .args(["kill-session", "-t", &tmux_session])
-            .status()
-            .await;
-    }
 
     // 2. Query agents to clean up worktrees and branches.
     let agents = crate::db::queries::get_agents_for_session(pool, session_id).await?;
@@ -248,20 +236,13 @@ pub async fn stop_session(
         println!("Released {} lease records", released_leases_count);
     }
 
-    let run_id = format!(
-        "{}-{}",
-        session_id,
-        session.created_at.format("%Y%m%dT%H%M%SZ")
-    );
-    let cleanup_workflow_id =
-        workflow_id_for_session_cleanup(&session.project_slug, session_id, &run_id);
-
-    // 4. Update audit projection in SQLite and mark as stopped.
+    // 4. Update audit projection in SQLite and mark as stopped. SQLite is the
+    // single source of truth — there is no Temporal cleanup workflow to notify.
     let audit_payload = json!({
         "preserveWorktrees": options.preserve_worktrees,
         "closedIterm": iterm_closed,
         "releasedLeases": released_leases_count > 0,
-        "finalizedAudit": false,
+        "finalizedAudit": true,
     })
     .to_string();
 
@@ -278,27 +259,6 @@ pub async fn stop_session(
         Some(&audit_payload),
     )
     .await?;
-
-    let finalized_audit = true;
-
-    // 5. Notify cleanup workflow.
-    if let Err(e) = signal_cleanup_request(
-        &config.temporal_address,
-        &config.temporal_namespace,
-        &cleanup_workflow_id,
-        options.preserve_worktrees,
-        iterm_closed,
-        true,
-        finalized_audit,
-    )
-    .await
-    {
-        info!(
-            error = %e,
-            workflow_id = %cleanup_workflow_id,
-            "Failed to signal cleanup workflow"
-        );
-    }
 
     println!("Session '{}' stopped successfully", session_id);
     Ok(())

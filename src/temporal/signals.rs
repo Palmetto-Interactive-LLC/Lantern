@@ -10,9 +10,10 @@ const DEFAULT_ENCODING: &str = "json/plain";
 
 // NOTE: the SessionLifecycle/SessionSetupWorkflow bootstrap (SessionIdentity,
 // search-attribute/payload builders, bootstrap_session_workflows) was removed —
-// those System-1 workflows ran on a queue no worker polled and collided with the
-// agent-runner's OrchestratorWorkflow. Session lifecycle is owned by System 2.
-// Only the human-control + cleanup signal paths remain here.
+// those workflows ran on a queue no worker polled. Session lifecycle and
+// delivery are owned directly by the Rust runtime (SQLite + direct iTerm2
+// injection); Temporal stays bootable but off the delivery path. Only the
+// human-control + cleanup signal helpers remain here.
 
 pub fn workflow_id_for_human_control(repo_id: &str, session_id: &str, run_id: &str) -> String {
     format!(

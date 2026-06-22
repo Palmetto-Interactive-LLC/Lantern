@@ -1,6 +1,6 @@
--- Runner-lease support for the self-contained agent-runner port (Option C-sqlite).
--- Lets the local agent-runner hold its process lease and record runs/signals in
--- lantern's SQLite DB instead of a remote Postgres. Local-only; no remote deps.
+-- Process-lease + run/signal audit support, stored entirely in lantern's local
+-- SQLite DB (no remote deps). Tracks each pane's process lease and records runs
+-- and signals locally.
 
 -- Process-level lease tracking on the existing per-(session,role) agent row.
 ALTER TABLE agents ADD COLUMN runner_pid INTEGER;

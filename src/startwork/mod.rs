@@ -53,7 +53,7 @@ const TEAM_LABELS: &[(&str, &str)] = &[
 /// Agent kinds accepted as the last positional argument (legacy startwork syntax).
 const KNOWN_AGENT_KINDS: &[&str] = &["claude", "codex", "gemini", "agy", "agi", "kimi"];
 
-/// Parse `[name] [number] [agent]` positionals like the Python workbench-up.py launcher.
+/// Parse `[name] [number] [agent]` positionals from the startwork command line.
 ///
 /// `--agent` on the CLI wins over a trailing agent token.
 pub fn parse_startwork_args(
@@ -208,7 +208,7 @@ def process_cmd(cmd):
         actual_cmd = cmd
         role_label = 'ORCHESTRATOR'
     
-    print(f'\x1b[1;33mRouting note to {{role_label}} via Temporal: "{{actual_cmd}}"\x1b[0m')
+    print(f'\x1b[1;33mRouting note to {{role_label}}: "{{actual_cmd}}"\x1b[0m')
     
     env = os.environ.copy()
     env['DEVORCH_SESSION'] = '{session_id}'
@@ -483,15 +483,12 @@ finally:
         );
     }
 
-    // For kimi/codex squads: write init prompts to a JSON file that agent-runner reads
-    // after signalWithStart (when the ExecutionWindowWorkflow exists). agent-runner
-    // deposits the init as a windowDispatchSignal and gates delivery on MCP readiness.
-    // This replaces the old iterm_batch_init.py fire-and-forget approach.
-    let has_temporal_init = window_defs.iter().any(|w| {
-        w.agent_kind.eq_ignore_ascii_case("kimi") || w.agent_kind.eq_ignore_ascii_case("codex")
-    });
-    if has_temporal_init && !init_by_role.is_empty() {
-        write_kimi_init_file(&session_id, &run_id, &init_by_role);
+    // Kimi panes launch the interactive CLI directly and cannot take their init
+    // prompt as a launch argument, so inject it straight into the pane after the
+    // layout settles (fast-retry until the pane is ready). claude/agy/codex panes
+    // already receive their init inline on the agent command line.
+    if !init_by_role.is_empty() {
+        run_batch_init(&session_id, &init_by_role, &iterm_sessions, &titles_by_role).await;
     }
 
     for wdef in window_defs.iter() {
@@ -528,12 +525,10 @@ finally:
     };
     queries::insert_session(&db_pool, &session).await?;
 
-    // NOTE: session lifecycle is owned by the DevEnvironment agent-runner's
-    // OrchestratorWorkflow (session:{session}:orchestrator on the per-session
-    // coord queue). The previous SessionLifecycle/SessionSetupWorkflow bootstrap
-    // started workflows on the `lantern-devorch` queue that no worker polls and
-    // whose types no loaded bundle registers — they hung pending forever and a
-    // bootstrap error aborted startwork. Removed.
+    // NOTE: there is no session-lifecycle workflow. Each pane hosts its agent CLI
+    // directly and SQLite is the single source of truth for session/agent state;
+    // delivery injects straight into the iTerm2 panes registered below. No Temporal
+    // bootstrap is started on the launch path.
 
     // Register agents + terminal targets concurrently (one task per pane).
     register_agents_parallel(
@@ -1460,9 +1455,9 @@ fn build_init_by_role(
     }
     let mut map = std::collections::HashMap::new();
     for wdef in window_defs {
-        let is_gated = wdef.agent_kind.eq_ignore_ascii_case("kimi")
-            || wdef.agent_kind.eq_ignore_ascii_case("codex");
-        if !is_gated {
+        // Only Kimi needs post-launch injection; every other agent CLI takes its
+        // init prompt inline on the command line (see build_agent_command).
+        if !wdef.agent_kind.eq_ignore_ascii_case("kimi") {
             continue;
         }
         let role = wdef
@@ -1520,7 +1515,7 @@ fn build_startup_commands(
     // Optionally source the user's env file. Wrapped in a group with a trailing
     // `true` so a missing (or non-matching) file never returns non-zero — this
     // segment is part of a single `&&` startup chain, and without the guard a
-    // missing config/env short-circuits the chain and agent-runner never spawns.
+    // missing config/env short-circuits the chain and the agent CLI never launches.
     let env_src =
         r#"{ [ -f "$HOME/.lantern/config/env" ] && source "$HOME/.lantern/config/env"; true; }"#;
     let corepack_bootstrap = "export COREPACK_ENABLE_DOWNLOAD_PROMPT=0";
@@ -1532,7 +1527,6 @@ fn build_startup_commands(
         shell_escape("/opt/homebrew/bin"),
         shell_escape(&ambient_path)
     );
-    let runner_bin = local_bin.join("agent-runner");
 
     let mut map = std::collections::HashMap::new();
     for (i, wdef) in window_defs.iter().enumerate() {
@@ -1564,64 +1558,19 @@ fn build_startup_commands(
             wdef.name
         );
 
-        let runner = format!(
-            "{} --session={} --run-id={} --role={} --pane-name={} --worktree={} --branch={} --agent={}",
-            runner_bin.display(),
-            wdef.env["DEVORCH_SESSION"],
-            wdef.env["DEVORCH_RUN_ID"],
-            wdef.env["DEVORCH_ROLE"],
-            wdef.name,
-            wdef.dir,
-            wdef.name,
-            if wdef.agent_kind == "gemini" {
-                "claude"
-            } else {
-                &wdef.agent_kind
-            }
+        // Every pane runs its agent CLI (or the input router) DIRECTLY — no
+        // agent-runner --spawn wrapper, no tmux session. SQLite is the source of
+        // truth and delivery injects straight into the iTerm2 pane, so the pane
+        // only needs to host the live agent process.
+        let startup = format!(
+            "{} && {} && {} && cd {} && {} && {}",
+            corepack_bootstrap,
+            env_src,
+            env_line,
+            shell_escape(&wdef.dir),
+            banner,
+            wdef.cmd
         );
-
-        let is_orchestrator = role == "orchestrator";
-        let is_input = role == "input";
-        let startup = if is_orchestrator {
-            let tmux_session = format!("devorch_orch_{}", wdef.env["DEVORCH_SESSION"]);
-            let inner_cmd = format!(
-                "cd {} && {} && {} --spawn {}",
-                shell_escape(&wdef.dir),
-                banner,
-                runner,
-                shell_escape(&wdef.cmd)
-            );
-            format!(
-                "{} && {} && {} && tmux new-session -A -s {} {}",
-                corepack_bootstrap,
-                env_src,
-                env_line,
-                shell_escape(&tmux_session),
-                shell_escape(&inner_cmd)
-            )
-        } else if is_input {
-            let tmux_session = format!("devorch_input_{}", wdef.env["DEVORCH_SESSION"]);
-            let inner_cmd = format!("cd {} && {}", shell_escape(&wdef.dir), wdef.cmd);
-            format!(
-                "{} && {} && {} && tmux new-session -A -s {} {}",
-                corepack_bootstrap,
-                env_src,
-                env_line,
-                shell_escape(&tmux_session),
-                shell_escape(&inner_cmd)
-            )
-        } else {
-            format!(
-                "{} && {} && {} && cd {} && {} && {} --spawn {}",
-                corepack_bootstrap,
-                env_src,
-                env_line,
-                shell_escape(&wdef.dir),
-                banner,
-                runner,
-                shell_escape(&wdef.cmd)
-            )
-        };
 
         let script_path = format!("/tmp/devorch-startup-{}-{}.sh", session_id, i);
         if std::fs::write(&script_path, format!("{}\n", startup)).is_ok() {
@@ -1636,46 +1585,83 @@ fn build_startup_commands(
     map
 }
 
-// Create the squad layout in a new iTerm2 window using the Python API.
-// Calls `src/startwork/iterm_launch.py` which opens the window, injects startup
-// commands into each pane on the same connection, and returns session IDs.
-/// Write kimi init prompts to /tmp/devorch-kimi-init-<session>.json.
-/// agent-runner reads this file after signalWithStart (once the ExecutionWindowWorkflow
-/// exists) and deposits each prompt as a windowDispatchSignal with task_id "init:<role>".
-/// The workflow gates delivery on windowKimiMcpReadySignal from the runner.
-fn write_kimi_init_file(
+/// Inject post-launch init prompts directly into the relevant panes via
+/// `iterm_batch_init.py` (fast-retry until each pane's CLI is ready). Used for
+/// Kimi, whose interactive CLI cannot accept the init prompt as a launch arg.
+/// Best-effort: a failure here is logged, not fatal.
+async fn run_batch_init(
     session_id: &str,
-    run_id: &str,
     init_by_role: &std::collections::HashMap<String, String>,
+    iterm_sessions: &std::collections::HashMap<String, String>,
+    titles_by_role: &std::collections::HashMap<String, String>,
 ) {
-    let dispatches: Vec<serde_json::Value> = init_by_role
-        .iter()
-        .map(|(role, text)| {
-            serde_json::json!({
-                "message_id": format!("init-{}-{}", role, run_id),
-                "task_id": format!("init:{}", role),
-                "role": role,
-                "from_role": "orchestrator",
-                "summary": text,
-                "priority": "high",
-                "created_at": chrono::Utc::now().to_rfc3339(),
-            })
-        })
-        .collect();
-
-    let path = format!("/tmp/devorch-kimi-init-{}.json", session_id);
-    match serde_json::to_string_pretty(&dispatches) {
-        Ok(json) => {
-            if let Err(e) = std::fs::write(&path, &json) {
-                tracing::warn!(error = %e, path = %path, "failed to write kimi init file");
-            } else {
-                info!(path = %path, count = dispatches.len(), "kimi init dispatches written for agent-runner");
-            }
+    let script_path = match crate::terminal::locate_script("iterm_batch_init.py") {
+        Ok(p) => p,
+        Err(e) => {
+            tracing::warn!(error = %e, "iterm_batch_init.py not found; skipping init injection");
+            return;
         }
-        Err(e) => tracing::warn!(error = %e, "failed to serialize kimi init dispatches"),
+    };
+
+    let init_file = format!("/tmp/devorch-init-{}.json", session_id);
+    let sessions_file = format!("/tmp/devorch-init-sessions-{}.json", session_id);
+    let titles_file = format!("/tmp/devorch-init-titles-{}.json", session_id);
+
+    let write_all = (|| -> Result<()> {
+        std::fs::write(&init_file, serde_json::to_string(init_by_role)?)?;
+        std::fs::write(&sessions_file, serde_json::to_string(iterm_sessions)?)?;
+        std::fs::write(&titles_file, serde_json::to_string(titles_by_role)?)?;
+        Ok(())
+    })();
+    if let Err(e) = write_all {
+        tracing::warn!(error = %e, "failed to stage init injection files");
+        return;
+    }
+
+    let script_str = match script_path.to_str() {
+        Some(s) => s,
+        None => {
+            tracing::warn!("non-UTF-8 iterm_batch_init.py path; skipping init injection");
+            return;
+        }
+    };
+    let result = Command::new("python3")
+        .args([
+            script_str,
+            "--init-file",
+            &init_file,
+            "--sessions-file",
+            &sessions_file,
+            "--titles-file",
+            &titles_file,
+        ])
+        .output()
+        .await;
+
+    let _ = std::fs::remove_file(&init_file);
+    let _ = std::fs::remove_file(&sessions_file);
+    let _ = std::fs::remove_file(&titles_file);
+
+    match result {
+        Ok(output) if output.status.success() => {
+            info!(
+                count = init_by_role.len(),
+                "Injected post-launch init prompts"
+            );
+        }
+        Ok(output) => {
+            tracing::warn!(
+                stderr = %String::from_utf8_lossy(&output.stderr).trim(),
+                "iterm_batch_init.py reported errors"
+            );
+        }
+        Err(e) => tracing::warn!(error = %e, "failed to run iterm_batch_init.py"),
     }
 }
 
+// Create the squad layout in a new iTerm2 window using the Python API.
+// Calls `src/startwork/iterm_launch.py` which opens the window, injects startup
+// commands into each pane on the same connection, and returns session IDs.
 async fn create_iterm_layout(
     session_id: &str,
     titles_by_role: &std::collections::HashMap<String, String>,

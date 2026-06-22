@@ -110,7 +110,7 @@ ensure_kimi_devorch_mcp() {
     if ! command -v kimi >/dev/null 2>&1; then
         return 0
     fi
-    local mcp_bin="${HOME}/.local/bin/devorch-mcp-client"
+    local mcp_bin="${LANTERN_BIN}/lantern"
     if [[ ! -x "$mcp_bin" ]]; then
         log "WARN: $mcp_bin missing — Kimi panes cannot call devorch MCP"
         return 0
@@ -119,8 +119,8 @@ ensure_kimi_devorch_mcp() {
         log "INFO: devorch MCP already registered for kimi"
         return 0
     fi
-    log "INFO: Registering devorch MCP for kimi..."
-    kimi mcp add devorch -- "$mcp_bin" >/dev/null 2>&1 || \
+    log "INFO: Registering devorch MCP for kimi (lantern mcp)..."
+    kimi mcp add devorch -- "$mcp_bin" mcp >/dev/null 2>&1 || \
         log "WARN: kimi mcp add devorch failed"
 }
 

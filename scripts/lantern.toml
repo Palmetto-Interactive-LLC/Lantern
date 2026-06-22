@@ -1,4 +1,6 @@
 machine_id = "mac-studio"
+temporal_address = "127.0.0.1:8243"
+temporal_namespace = "default"
 reconciliation_interval_secs = 5
 ack_timeout_secs = 30
 ack_retry_interval_secs = 30

@@ -94,6 +94,24 @@ enum Commands {
     },
     /// Run the Lantern MCP stdio server (spawn this as a child process from agent CLIs)
     Mcp,
+    /// Run a headless Goose/ACP worker for a one-shot task (direct, testable dispatch)
+    AcpRun {
+        /// Agent CLI family (claude | codex; others fall back to claude-acp)
+        #[arg(long)]
+        agent: String,
+        /// Squad role (orchestrator | ai | sec | doc | qa | ...)
+        #[arg(long)]
+        role: String,
+        /// Working directory to run the worker in (worktree path)
+        #[arg(long)]
+        cwd: String,
+        /// Task prompt for the headless worker
+        #[arg(long)]
+        task: String,
+        /// Squad session id passed through to the devorch MCP extension
+        #[arg(long, default_value = "adhoc")]
+        session: String,
+    },
     /// Stop a squad workspace and clean up its resources
     Stopwork {
         /// Session ID to stop (e.g. m7-navi-1), or omit to auto-detect
@@ -144,6 +162,29 @@ async fn main() -> anyhow::Result<()> {
         Commands::Recover { agent } => commands::recover(&agent).await,
         Commands::Note { agent, message } => commands::note(&agent, &message.join(" ")).await,
         Commands::Mcp => commands::mcp().await,
+        Commands::AcpRun {
+            agent,
+            role,
+            cwd,
+            task,
+            session,
+        } => {
+            let output = delivery::acp::spawn_acp_worker(
+                &agent,
+                &role,
+                std::path::Path::new(&cwd),
+                &task,
+                &session,
+                None,
+            )
+            .await?;
+            print!("{}", String::from_utf8_lossy(&output.stdout));
+            eprint!("{}", String::from_utf8_lossy(&output.stderr));
+            if !output.status.success() {
+                anyhow::bail!("ACP worker exited with status: {}", output.status);
+            }
+            Ok(())
+        }
         Commands::Startwork {
             positionals,
             agent,

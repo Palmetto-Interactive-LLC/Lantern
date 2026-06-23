@@ -133,57 +133,26 @@ pub async fn resolve_iterm_session(
     Ok(sid)
 }
 
-/// Delivery transport backend. Selected per-process via `LANTERN_TRANSPORT`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Transport {
-    /// Type text into a live iTerm2 pane (default; preserves legacy behavior).
-    Iterm,
-    /// Spawn a headless Goose/ACP worker (see `delivery::acp`).
-    Acp,
-}
-
-/// Resolve the active transport from the `LANTERN_TRANSPORT` env var.
-/// `acp` selects the ACP backend; anything else (or unset) is `Iterm`.
-pub fn current_transport() -> Transport {
-    // Read once at first use: the transport is a process-global launch choice and
-    // must not change mid-session (also keeps concurrent tests deterministic).
-    static CACHE: std::sync::OnceLock<Transport> = std::sync::OnceLock::new();
-    *CACHE.get_or_init(
-        || match std::env::var("LANTERN_TRANSPORT").ok().as_deref() {
-            Some("acp") => Transport::Acp,
-            _ => Transport::Iterm,
-        },
-    )
-}
-
-/// Resolve the pane and inject in one step. Returns a clear error if the role has
-/// no known pane so callers can fall back to SQLite-only persistence.
-async fn deliver_to_role_iterm(
-    pool: &SqlitePool,
-    session_id: &str,
-    role: &str,
-    text: &str,
-) -> Result<()> {
-    let iterm_session = resolve_iterm_session(pool, session_id, role)
-        .await?
-        .with_context(|| format!("no live pane for role '{role}' in session '{session_id}'"))?;
-    inject_text(&iterm_session, text).await
-}
-
-/// Deliver `text` to the agent for `role`, dispatching to the active transport.
+/// Deliver `text` to the agent for `role`, routing by the TARGET:
 ///
-/// Public signature is intentionally identical across transports so callers
-/// (autoheal, mcp::tools::try_inject) need no changes.
+/// - a role with a live iTerm pane (orchestrator, or any role in the legacy
+///   all-panes team) gets `text` typed into its pane;
+/// - a paneless role (a headless ACP specialist in the default model) gets a
+///   background `goose run` worker spawned to carry out the work.
+///
+/// This makes both the headed-orchestrator + headless-workers model and the
+/// legacy all-panes team work with no global switch — the routing follows
+/// whether the target was registered with a terminal target. The public
+/// signature is unchanged so callers (autoheal, mcp::tools::try_inject) need no
+/// changes.
 pub async fn deliver_to_role(
     pool: &SqlitePool,
     session_id: &str,
     role: &str,
     text: &str,
 ) -> Result<()> {
-    match current_transport() {
-        Transport::Iterm => deliver_to_role_iterm(pool, session_id, role, text).await,
-        Transport::Acp => {
-            crate::delivery::acp::deliver_to_role_acp(pool, session_id, role, text).await
-        }
+    match resolve_iterm_session(pool, session_id, role).await? {
+        Some(iterm_session) => inject_text(&iterm_session, text).await,
+        None => crate::delivery::acp::deliver_to_role_acp(pool, session_id, role, text).await,
     }
 }

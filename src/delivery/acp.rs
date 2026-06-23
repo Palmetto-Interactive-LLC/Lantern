@@ -18,6 +18,12 @@ use std::path::Path;
 use std::process::Output;
 use tokio::process::Command;
 
+// Minimal libc `kill(2)` binding so `stopwork` can SIGTERM lingering headless
+// workers without pulling in the `libc`/`nix` crate.
+extern "C" {
+    fn kill(pid: i32, sig: i32) -> i32;
+}
+
 /// Map an agent CLI family to the goose ACP provider id.
 ///
 /// claude -> claude-acp; codex -> codex-acp. Everything else (gemini/agy/kimi)
@@ -88,26 +94,22 @@ pub fn devorch_extension_value() -> String {
     format!("{} mcp", quote_if_needed(&lantern_mcp_command()))
 }
 
-/// Spawn a headless one-shot Goose/ACP worker for `task` and wait for it to exit.
-///
-/// Returns the captured process `Output` (caller inspects status/stdout/stderr).
-pub async fn spawn_acp_worker(
+/// Build the `goose run` command for a one-shot headless ACP worker: the task in
+/// `-t`, the devorch stdio MCP wired via `--with-extension`, provider + per-role
+/// model, and DEVORCH_* env so the worker's devorch knows who it is acting as.
+fn build_goose_run_command(
     agent_kind: &str,
     role: &str,
     cwd: &Path,
     task: &str,
     session: &str,
     run_id: Option<&str>,
-) -> Result<Output> {
+) -> Command {
     let provider = goose_provider_for_agent(agent_kind);
     let model = goose_model_for_role(agent_kind, role);
-    let mcp_cmd = lantern_mcp_command();
-
-    // The devorch stdio MCP server, with its env passed through so it knows which
-    // session/role it is acting for inside the ACP agent.
     let extension = format!(
         "DEVORCH_SESSION={session} DEVORCH_ROLE={role} {mcp} mcp",
-        mcp = quote_if_needed(&mcp_cmd),
+        mcp = quote_if_needed(&lantern_mcp_command()),
     );
 
     let mut cmd = Command::new("goose");
@@ -122,29 +124,79 @@ pub async fn spawn_acp_worker(
         .env("GOOSE_DISABLE_KEYRING", "1")
         .env("DEVORCH_SESSION", session)
         .env("DEVORCH_ROLE", role);
-
     if let Some(rid) = run_id {
         cmd.env("DEVORCH_RUN_ID", rid);
     }
-
-    let output = cmd.output().await.with_context(|| {
-        format!(
-            "failed to spawn goose ACP worker (provider={provider}, model={model}, role={role}, session={session})"
-        )
-    })?;
-
-    Ok(output)
+    cmd
 }
 
-/// ACP analog of `inject::deliver_to_role_iterm`: find the agent for `role`, then
-/// spawn a headless Goose/ACP worker in its worktree to carry out `text`.
+/// Spawn a headless one-shot Goose/ACP worker for `task` and wait for it to exit.
+/// Returns the captured `Output` (used by the `lantern acp-run` command).
+pub async fn spawn_acp_worker(
+    agent_kind: &str,
+    role: &str,
+    cwd: &Path,
+    task: &str,
+    session: &str,
+    run_id: Option<&str>,
+) -> Result<Output> {
+    build_goose_run_command(agent_kind, role, cwd, task, session, run_id)
+        .output()
+        .await
+        .with_context(|| {
+            format!("failed to spawn goose ACP worker (role={role}, session={session})")
+        })
+}
+
+/// Per-session file of spawned headless worker PIDs, under `~/.lantern/run/`,
+/// so `stopwork` can terminate any still running.
+fn worker_pidfile(session: &str) -> std::path::PathBuf {
+    let dir = dirs::home_dir()
+        .unwrap_or_else(|| std::path::PathBuf::from("/tmp"))
+        .join(".lantern")
+        .join("run");
+    let _ = std::fs::create_dir_all(&dir);
+    dir.join(format!("workers-{session}.pids"))
+}
+
+fn record_worker_pid(session: &str, pid: u32) {
+    use std::io::Write;
+    if let Ok(mut f) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(worker_pidfile(session))
+    {
+        let _ = writeln!(f, "{pid}");
+    }
+}
+
+/// SIGTERM any headless workers still running for `session`, then remove the
+/// pidfile. Returns how many PIDs were signalled. Called by `stopwork`.
+pub fn kill_session_workers(session: &str) -> usize {
+    let path = worker_pidfile(session);
+    let Ok(contents) = std::fs::read_to_string(&path) else {
+        return 0;
+    };
+    let mut killed = 0;
+    for line in contents.lines() {
+        if let Ok(pid) = line.trim().parse::<i32>() {
+            if unsafe { kill(pid, 15) } == 0 {
+                killed += 1;
+            }
+        }
+    }
+    let _ = std::fs::remove_file(&path);
+    killed
+}
+
+/// Spawn a headless Goose/ACP specialist worker for `role` to carry out `text`.
 ///
-/// Fire-and-forget by design: a headless `goose run` can take minutes, and the
-/// iTerm callers (`autoheal`, `mcp::tools::try_inject`, `human::commands`) treat
-/// delivery as best-effort and must not block. The worker reports its result back
-/// through the devorch MCP (passed via `--with-extension`), exactly like a pane
-/// agent — so we resolve the target synchronously (surfacing a missing role
-/// immediately) then spawn the run in the background and return.
+/// Fire-and-forget: a headless `goose run` can take minutes and callers (devorch
+/// dispatch, autoheal, peer messages) must not block. We resolve the worker's
+/// worktree synchronously (surfacing a missing role immediately), record its PID
+/// for `stopwork`, then run it in the background. The worker reports back through
+/// the devorch MCP — `report_status`/`blocker` route to the orchestrator pane via
+/// `deliver_to_role`.
 pub async fn deliver_to_role_acp(
     pool: &SqlitePool,
     session_id: &str,
@@ -154,7 +206,6 @@ pub async fn deliver_to_role_acp(
     let agents = crate::db::queries::get_agents_for_session(pool, session_id)
         .await
         .context("load agents for ACP delivery")?;
-
     let agent = agents
         .into_iter()
         .find(|a| a.role == role)
@@ -164,33 +215,44 @@ pub async fn deliver_to_role_acp(
     let worktree = agent.worktree_path.clone();
     let role = role.to_string();
     let session = session_id.to_string();
-    let task = text.to_string();
+
+    // Headless workers can't use the pane-oriented `signal` CLI; instruct them to
+    // report through the devorch MCP and to act as the role specialist.
+    let task = format!(
+        "You are the {role} specialist worker running headless via Goose/ACP for session {session}. \
+         Use your {role} expertise and tools (including beads via `bd`) to complete the work below. \
+         When finished, call the `devorch_report_status` MCP tool with status \"complete\", the task id, \
+         and a one-line summary plus validation. If you cannot proceed, call `devorch_blocker` with the \
+         reason. Ignore any 'signal --status ...' CLI lines below — use the devorch MCP tools instead.\n\n{text}"
+    );
+
+    let mut cmd = build_goose_run_command(
+        &agent_kind,
+        &role,
+        Path::new(&worktree),
+        &task,
+        &session,
+        None,
+    );
+    let child = cmd
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .with_context(|| format!("spawn goose worker for role '{role}'"))?;
+    if let Some(pid) = child.id() {
+        record_worker_pid(&session, pid);
+    }
 
     tokio::spawn(async move {
-        match spawn_acp_worker(
-            &agent_kind,
-            &role,
-            Path::new(&worktree),
-            &task,
-            &session,
-            None,
-        )
-        .await
-        {
-            Ok(output) if output.status.success() => {}
-            Ok(output) => tracing::warn!(
-                role = %role,
-                session = %session,
-                status = %output.status,
-                stderr = %String::from_utf8_lossy(&output.stderr).trim(),
-                "ACP worker exited non-zero"
-            ),
+        match child.wait_with_output().await {
+            Ok(o) if o.status.success() => {}
+            Ok(o) => tracing::warn!(role = %role, session = %session, status = %o.status,
+                stderr = %String::from_utf8_lossy(&o.stderr).trim(), "ACP worker exited non-zero"),
             Err(e) => {
-                tracing::error!(role = %role, session = %session, error = %e, "failed to spawn ACP worker")
+                tracing::error!(role = %role, session = %session, error = %e, "ACP worker failed")
             }
         }
     });
-
     Ok(())
 }
 

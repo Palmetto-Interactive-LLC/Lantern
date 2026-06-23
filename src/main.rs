@@ -292,6 +292,7 @@ mod commands {
         println!("Machine:    {}", config.machine_id);
         println!("Database:   {}", config.database_url);
         println!("Temporal:   {}", config.temporal_address);
+        println!("Logs:       {}", config.logs_dir.display());
         println!();
 
         // Sessions

@@ -192,6 +192,14 @@ pub async fn stop_session(
         println!("Released {} lease records", released_leases_count);
     }
 
+    // Terminate any headless ACP specialists still running for this session, and
+    // remove per-session temp files.
+    let killed = crate::delivery::acp::kill_session_workers(session_id);
+    if killed > 0 {
+        println!("Terminated {} headless worker process(es)", killed);
+    }
+    let _ = std::fs::remove_file(format!("/tmp/devorch-input-router-{session_id}.py"));
+
     // 4. Update audit projection in SQLite and mark as stopped. SQLite is the
     // single source of truth — there is no Temporal cleanup workflow to notify.
     let audit_payload = json!({

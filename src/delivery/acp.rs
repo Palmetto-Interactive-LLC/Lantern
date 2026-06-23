@@ -79,6 +79,15 @@ fn quote_if_needed(s: &str) -> String {
     }
 }
 
+/// The `--with-extension` value that wires the devorch stdio MCP into a goose
+/// process: `<lantern> mcp`. Relies on the surrounding process env
+/// (`DEVORCH_SESSION` / `DEVORCH_ROLE`) being inherited by the spawned server —
+/// which holds both for the headless path (set on the goose child here) and for
+/// a headed `goose session` launched inside a pane that already exports them.
+pub fn devorch_extension_value() -> String {
+    format!("{} mcp", quote_if_needed(&lantern_mcp_command()))
+}
+
 /// Spawn a headless one-shot Goose/ACP worker for `task` and wait for it to exit.
 ///
 /// Returns the captured process `Output` (caller inspects status/stdout/stderr).

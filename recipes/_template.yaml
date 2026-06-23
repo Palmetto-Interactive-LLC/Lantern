@@ -1,0 +1,91 @@
+# Goose Recipe Template — pi-code-orchestrator worker roles
+#
+# Run a recipe:
+#   GOOSE_DISABLE_KEYRING=1 goose run --recipe recipes/<name>.yaml \
+#     --params session_id=<lantern-session> --no-session
+#
+# Render without executing (dry-run):
+#   goose run --recipe recipes/<name>.yaml --render-recipe \
+#     --params session_id=<lantern-session>
+#
+# Field reference (all fields shown; only version + one of instructions/prompt are required):
+#
+#   version       (string, required) — recipe schema version. Use "1.0.0".
+#   title         (string) — short human label shown in goose UI / --explain.
+#   description   (string) — one-paragraph purpose, shown in goose UI / --explain.
+#   instructions  (string, required*) — system prompt / role mandate injected before the
+#                   agent's first turn. Supports { {param_key} } template interpolation.
+#                   *At least one of instructions or prompt is required.
+#   prompt        (string) — the user-turn prompt sent as the first message. Optional when
+#                   instructions covers everything; useful for one-shot automation.
+#   settings:
+#     goose_provider  (string) — provider id, overrides GOOSE_PROVIDER env. ACP options:
+#                       claude-acp | codex-acp
+#     goose_model     (string) — model id, overrides GOOSE_MODEL env.
+#                       claude-acp models: opus | sonnet | haiku
+#                       codex-acp models:  gpt-5.2-codex | gpt-5.2
+#   extensions:   — list of MCP extensions to load for this recipe.
+#     - type: stdio       # only "stdio" supported for local commands
+#       name: <string>    # logical name used in tool namespacing
+#       cmd: <string>     # executable on PATH
+#       args: [<string>]  # argv[1..] passed to cmd
+#       envs: {}          # static env vars injected into the child process
+#       env_keys: []      # env var NAMES to forward from the parent env
+#       timeout: 300      # seconds before the extension call times out
+#   parameters:   — declared template variables referenced as { {key} } in instructions/prompt.
+#                   Goose validates that every declared parameter is used and every
+#                   { {ref} } has a matching declaration. Pass values at runtime via
+#                   --params key=value (repeatable).
+#     - key: <string>          # template variable name
+#       input_type: string     # "string" is the only confirmed type
+#       requirement: required  # "required" | "optional"
+#       description: <string>  # shown to user when prompting for missing values
+
+version: 1.0.0
+title: "Worker Role Template"
+description: >
+  Replace this description with the role's purpose. This template shows every
+  supported field with inline documentation. Copy it, remove unused fields, and
+  fill in the role-specific instructions.
+
+instructions: |
+  You are a {{role}} worker in a Lantern AI coding squad for session {{session_id}}.
+
+  Replace these instructions with the role mandate.
+
+  ## Task state (beads)
+  Use the `bd` CLI to track task state throughout your work:
+    - `bd ready --json`            list open beads assigned to you
+    - `bd create -t "<title>"`     create a new bead for a sub-task you discover
+    - `bd dep <from> blocks <to>`  declare a blocking dependency
+    - `bd close <id>`              mark a bead done when its work is verified
+
+  ## Status reporting (devorch MCP)
+  The devorch MCP server is available as the "devorch" extension. Use its tools to:
+    - report_status   — emit a heartbeat or milestone update to the orchestrator
+    - peer_message    — send a message to another worker by role name
+    - query_team_state — inspect what other workers are doing
+
+settings:
+  goose_provider: claude-acp
+  goose_model: sonnet
+
+extensions:
+  - type: stdio
+    name: devorch
+    cmd: lantern
+    args:
+      - mcp
+    envs: {}
+    env_keys: []
+    timeout: 300
+
+parameters:
+  - key: session_id
+    input_type: string
+    requirement: required
+    description: "Lantern session identifier (e.g. myproject-1)"
+  - key: role
+    input_type: string
+    requirement: required
+    description: "Worker role label injected into instructions (e.g. ai, qa, doc)"

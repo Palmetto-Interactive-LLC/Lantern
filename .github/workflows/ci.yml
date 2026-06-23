@@ -12,26 +12,16 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      # Pinned (not @stable) so `cargo fmt --check` is reproducible — a floating
+      # stable rustfmt drifted and produced spurious failures on unchanged code.
+      - uses: dtolnay/rust-toolchain@master
         with:
+          toolchain: 1.95.0
           components: rustfmt
       - run: cargo fmt --check
       # NOTE: cargo check / clippy / test are intentionally omitted for now —
-      # the sqlx-backed build needs a reproducible CI build env (toolchain pin
-      # and/or a DB service or committed .sqlx offline cache). Tracked as a
-      # follow-up so this gate stays reliably green.
-
-  ts-typecheck:
-    name: TypeScript typecheck
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      # No `version:` — pnpm/action-setup reads packageManager (pnpm@10.x) from
-      # package.json; specifying both errors with "multiple versions specified".
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm typecheck
+      # the sqlx-backed build needs a reproducible CI build env (a DB service
+      # and/or a committed .sqlx offline cache). Tracked in beads as a follow-up.
+      #
+      # The TypeScript typecheck job was removed: this is a Rust-only repo
+      # (no package.json / .ts files), so that job could never pass.

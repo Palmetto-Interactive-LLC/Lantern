@@ -26,13 +26,13 @@ const GRID_ORDER: &[&str] = &[
 ];
 
 /// Codex models verified with `codex debug models --bundled` on 2026-05-23; docs: https://developers.openai.com/codex/models
-const CODEX_ROLE_MODELS: &[(&str, &str)] = &[
+pub(crate) const CODEX_ROLE_MODELS: &[(&str, &str)] = &[
     ("orchestrator", "gpt-5.5"),
     ("ai", "gpt-5.5"),
     ("sec", "gpt-5.5"),
 ];
 
-const CODEX_DEFAULT_MODEL: &str = "gpt-5.4-mini";
+pub(crate) const CODEX_DEFAULT_MODEL: &str = "gpt-5.4-mini";
 const CODEX_LAUNCH_ERROR_WINDOW: Duration = Duration::from_secs(5);
 const DEVORCH_DEFAULT_TASK_QUEUE: &str = "lantern-devorch";
 

@@ -1,0 +1,7 @@
+{
+  "database": "dolt",
+  "backend": "dolt",
+  "dolt_mode": "embedded",
+  "dolt_database": "pi_code_orchestrator",
+  "project_id": "d78a1ef5-0b53-4b22-9068-74ce80f997a6"
+}

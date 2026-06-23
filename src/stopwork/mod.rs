@@ -334,7 +334,11 @@ mod tests {
 
         let wroot = repo.join(".claude/worktrees/s-1");
         std::fs::create_dir_all(&wroot).unwrap();
-        let specs = [("orchestrator", "s-1"), ("ai", "s-ai-1"), ("dat", "s-dat-1")];
+        let specs = [
+            ("orchestrator", "s-1"),
+            ("ai", "s-ai-1"),
+            ("dat", "s-dat-1"),
+        ];
         let mut agents = Vec::new();
         for (role, branch) in specs {
             let wt = wroot.join(branch);
@@ -369,7 +373,10 @@ mod tests {
         )
         .to_string();
         for (_, b) in specs {
-            assert!(!br_out.contains(b), "branch {b} should be deleted:\n{br_out}");
+            assert!(
+                !br_out.contains(b),
+                "branch {b} should be deleted:\n{br_out}"
+            );
             assert!(!wroot.join(b).exists(), "worktree dir {b} should be gone");
         }
     }

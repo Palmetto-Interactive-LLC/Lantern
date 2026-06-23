@@ -51,7 +51,7 @@ const TEAM_LABELS: &[(&str, &str)] = &[
 ];
 
 /// Agent kinds accepted as the last positional argument (legacy startwork syntax).
-const KNOWN_AGENT_KINDS: &[&str] = &["claude", "codex", "gemini", "agy", "agi", "kimi"];
+const KNOWN_AGENT_KINDS: &[&str] = &["claude", "codex", "gemini", "agy", "agi", "kimi", "goose"];
 
 /// Parse `[name] [number] [agent]` positionals from the startwork command line.
 ///
@@ -821,6 +821,29 @@ fn build_agent_command(
             );
             cmd
         }
+        "goose" => {
+            // Headed Goose session driving an ACP provider (claude-acp), riding
+            // existing CLI auth. The session is watchable in the pane and is a
+            // live command target (delivery injects via the iTerm transport just
+            // like the other TUIs). devorch passes through via --with-extension;
+            // the init prompt is injected post-launch (see build_init_by_role),
+            // because `goose session` has no inline-prompt flag.
+            let _ = init;
+            let provider = crate::delivery::acp::goose_provider_for_agent("claude");
+            let gmodel = crate::delivery::acp::goose_model_for_role("claude", role);
+            let name_arg = pane_name
+                .map(|n| format!(" --name {}", shell_escape(n)))
+                .unwrap_or_default();
+            format!(
+                "env -u TERM_PROGRAM -u ITERM_SESSION_ID -u TERM_PROGRAM_VERSION \
+                 GOOSE_PROVIDER={} GOOSE_MODEL={} GOOSE_DISABLE_KEYRING=1 \
+                 goose session{} --with-extension {}",
+                provider,
+                gmodel,
+                name_arg,
+                shell_escape(&crate::delivery::acp::devorch_extension_value()),
+            )
+        }
         _ => {
             format!(
                 "claude --model {} --dangerously-skip-permissions{}",
@@ -889,6 +912,7 @@ fn get_model_for_role(agent_kind: &str, role: &str) -> String {
             _ => "Gemini 3.5 Flash (Medium)".to_string(),
         },
         "codex" => codex_model_for_role(role).to_string(),
+        "goose" => crate::delivery::acp::goose_model_for_role("claude", role),
         "kimi" => {
             // Must match a model id in ~/.kimi/config.toml (not the Toad "Default" alias).
             "kimi-code/kimi-for-coding".to_string()
@@ -1455,9 +1479,12 @@ fn build_init_by_role(
     }
     let mut map = std::collections::HashMap::new();
     for wdef in window_defs {
-        // Only Kimi needs post-launch injection; every other agent CLI takes its
-        // init prompt inline on the command line (see build_agent_command).
-        if !wdef.agent_kind.eq_ignore_ascii_case("kimi") {
+        // Kimi and headed Goose sessions need post-launch injection; every other
+        // agent CLI takes its init prompt inline on the command line (see
+        // build_agent_command).
+        if !wdef.agent_kind.eq_ignore_ascii_case("kimi")
+            && !wdef.agent_kind.eq_ignore_ascii_case("goose")
+        {
             continue;
         }
         let role = wdef
@@ -2062,6 +2089,10 @@ fn ensure_mcp_server_registered(agent_kind: &str) {
         "kimi" => {
             // Handled by ensure_devorch_mcp_ready() before pane launch.
         }
+        "goose" => {
+            // devorch is passed inline via `goose session --with-extension`;
+            // no global MCP registration needed.
+        }
         "gemini" | "agy" | "agi" => {
             let home = match dirs::home_dir() {
                 Some(h) => h,
@@ -2277,6 +2308,39 @@ mod parse_tests {
         assert!(!cmd.contains(" term"));
         assert!(!cmd.contains("toad"));
         assert!(cmd.contains("kimi-code/kimi-for-coding"));
+    }
+
+    #[test]
+    fn goose_command_is_headed_acp_session() {
+        // Heavyweight role -> claude-acp + opus, watchable `goose session` in a
+        // pane, devorch wired via --with-extension, init injected post-launch.
+        let cmd = super::build_agent_command("goose", "ai", Some("init prompt"), Some("pane-1"));
+        assert!(
+            cmd.contains("goose session"),
+            "must be a headed session: {cmd}"
+        );
+        assert!(
+            !cmd.contains("goose run"),
+            "must not be the headless one-shot"
+        );
+        assert!(cmd.contains("GOOSE_PROVIDER=claude-acp"));
+        assert!(cmd.contains("GOOSE_MODEL=opus"));
+        assert!(cmd.contains("GOOSE_DISABLE_KEYRING=1"));
+        assert!(cmd.contains("--with-extension"));
+        assert!(cmd.contains("mcp"), "devorch extension wired: {cmd}");
+        assert!(cmd.contains("--name 'pane-1'"));
+        // init is injected post-launch (build_init_by_role), not inline.
+        assert!(
+            !cmd.contains("init prompt"),
+            "init must not be inline for goose"
+        );
+    }
+
+    #[test]
+    fn goose_model_is_role_based() {
+        assert_eq!(super::get_model_for_role("goose", "ai"), "opus");
+        assert_eq!(super::get_model_for_role("goose", "doc"), "haiku");
+        assert_eq!(super::get_model_for_role("goose", "qa"), "sonnet");
     }
 
     #[test]

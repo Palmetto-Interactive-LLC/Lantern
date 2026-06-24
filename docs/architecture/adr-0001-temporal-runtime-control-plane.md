@@ -12,7 +12,7 @@ Lantern is being restored to a **self-contained architecture** where each develo
 4. Use SQLite for audit projections and diagnostics only
 5. Be deployable standalone with no remote server dependency
 
-The previous distributed model split runtime authority across a remote DevEnvironment node. That approach required agents to route through an external MCP client, forcing workflow definitions and Temporal state off-machine. The restoration returns to a self-contained per-machine model.
+The previous distributed model split runtime authority across a remote control plane. That approach required agents to route through an external MCP client, forcing workflow definitions and Temporal state off-machine. The restoration returns to a self-contained per-machine model.
 
 ## Decision
 
@@ -121,13 +121,13 @@ iTerm state (open/closed panes) is not authoritative for runtime control. Tempor
 
 The previous architecture (2025) split runtime authority:
 
-- DevEnvironment `devorch-mcp-client` was the MCP authority
-- Workflows lived in DevEnvironment workflow package on a remote server
+- The external orchestration client was the MCP authority
+- Workflows lived in the external workflow package on a remote server
 - Lantern Rust MCP served empty tools list
 - Remote Postgres held workflow state
 - iTerm2 was display-only with no delivery participation
 
-**This is fully deprecated.** All references to `devorch-mcp-client`, remote Temporal, remote Postgres, "Lantern MCP disabled", and split-runtime ownership are legacy history only.
+**This is fully deprecated.** All references to external MCP clients, remote Temporal, remote Postgres, "Lantern MCP disabled", and split-runtime ownership are legacy history only.
 
 ## Doctor-State Evolution
 

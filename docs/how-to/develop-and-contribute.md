@@ -106,12 +106,12 @@ tests/                  Integration tests
 
 ## Add or Change Runtime MCP Behavior
 
-Runtime MCP authority belongs to DevEnvironment `devorch-mcp-client`, not Lantern Rust MCP.
+Runtime MCP authority belongs to the orchestration layer, not Lantern Rust MCP.
 
 For runtime behavior:
 
 1. Update the relevant Temporal workflow contract.
-2. Map agent MCP calls in DevEnvironment `devorch-mcp-client`.
+2. Map agent MCP calls in the orchestration client.
 3. Keep Lantern Rust MCP compatibility responses aligned with [MCP runtime authority](../reference/mcp-tools.md).
 4. Document the workflow Update, Signal, or Query that owns the behavior.
 

@@ -8,7 +8,7 @@ This documentation is organized by **what you need**, not by source file. It fol
 
 - Temporal workflows own runtime control, message delivery, setup readiness, runner leases, human control, and recovery.
 - iTerm2 is display and lifecycle support only. It is not a message bus or reconciliation authority.
-- DevEnvironment `devorch-mcp-client` is the runtime MCP authority used by agents.
+- The MCP runtime layer provides MCP tools for agent status reporting, peer messaging, and workflow control.
 - SQLite stores inventory, audit projection, quarantine records, and planned doctor-state snapshots.
 - Legacy tmux/local-queue/Lantern-Rust-MCP runtime references are migration history only.
 
@@ -85,7 +85,7 @@ Lantern orchestrates tools that live outside this repository:
 | Tool | Location | Role |
 |------|----------|------|
 | `agent-runner` | `~/.local/bin/agent-runner` | Wraps agent CLI startup and coordinates runner readiness |
-| `devorch-mcp-client` | Agent MCP config | Maps agent runtime MCP calls to Temporal workflow Updates, Signals, and Queries |
+| MCP client | Agent MCP config | Runtime bridge for agent status, messaging, and workflow control via Temporal |
 | iTerm2 | `/Applications/iTerm.app` on macOS | Displays local agent processes |
 | Agent CLIs | `claude`, `agy`, `codex`, `kimi` | AI coding agents |
 

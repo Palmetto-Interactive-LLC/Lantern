@@ -86,7 +86,7 @@ launchctl stop com.lantern.relay
 
 ## Legacy Note
 
-Older service docs said active tmux squads continue running after services stop. Current squads are displayed in iTerm; the important runtime distinction is that Temporal and `devorch-mcp-client` connectivity are unavailable while services are down.
+Older service docs said active tmux squads continue running after services stop. Current squads are displayed in iTerm; the important runtime distinction is that Temporal and the orchestration client connectivity are unavailable while services are down.
 
 ## Related
 

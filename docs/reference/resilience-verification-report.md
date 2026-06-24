@@ -5,7 +5,7 @@ This report is the final evidence artifact for issue #32 and epic #1. It verifie
 ## Scope Verified
 
 - Rust Lantern no longer owns runtime message routing, peer delivery, queue leasing, or terminal fallback injection.
-- Runtime MCP/status/message/control operations are represented by Temporal workflow Updates, Signals, or Queries through the DevEnvironment `devorch-mcp-client` path.
+- Runtime MCP/status/message/control operations are represented by Temporal workflow Updates, Signals, or Queries through the orchestration client.
 - SQLite remains useful for inventory, audit projection, stale-state diagnosis, and quarantine records, but not runtime routing authority.
 - iTerm remains launch/display/close support. Runtime delivery is guarded by Temporal execution-window state and runner readiness.
 - Legacy tmux-era data is quarantined or migrated as historical compatibility data.

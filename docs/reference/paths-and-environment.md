@@ -80,14 +80,14 @@ Set by `startwork` before launching each agent:
 
 Each agent process sources `~/.config/devorch/env` if present. Use it for API keys and agent environment configuration.
 
-Runtime MCP configuration belongs in the agent CLI settings and should point to DevEnvironment `devorch-mcp-client`.
+Runtime MCP configuration belongs in the agent CLI settings and should point to the orchestration client.
 
 ## External Tools
 
 | Tool | Expected location | Purpose |
 |------|-------------------|---------|
 | `agent-runner` | `~/.local/bin/agent-runner` | Agent process wrapper and execution-window participant |
-| `devorch-mcp-client` | Agent MCP config | MCP bridge to Temporal workflows |
+| Orchestration client | Agent MCP config | MCP bridge to Temporal workflows |
 | iTerm2 | `/Applications/iTerm.app` | Display-only launcher |
 | `claude` | PATH | Agent CLI |
 | `agy` | PATH | Agent CLI |

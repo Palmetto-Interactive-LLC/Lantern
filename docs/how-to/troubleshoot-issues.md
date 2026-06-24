@@ -1,6 +1,6 @@
 # How to Troubleshoot Issues
 
-Diagnose current Lantern problems using Temporal workflow state, iTerm display readiness, DevEnvironment MCP configuration, and local projections.
+Diagnose current Lantern problems using Temporal workflow state, iTerm display readiness, orchestration client configuration, and local projections.
 
 ## Run Diagnostics First
 
@@ -63,7 +63,7 @@ In iTerm2, enable **Settings -> General -> Magic -> Enable Python API**. Re-run 
 
 - Confirm Relay and Temporal are running: `lantern doctor`
 - Check Relay logs: `lantern logs relay`
-- Verify `devorch-mcp-client` is configured in each agent CLI MCP setting.
+- Verify the orchestration client is configured in each agent CLI MCP setting.
 - In Temporal UI, inspect `McpSetupWorkflow`, `McpRecoveryWorkflow`, and `ExecutionWindowWorkflow` for the affected role.
 
 Do not repair this by direct terminal injection. Runtime MCP readiness belongs to the Temporal workflow path.
@@ -102,7 +102,7 @@ git worktree remove --force .claude/worktrees/<session>/myproject-ai-1
 which agent-runner
 ```
 
-Expected location: `~/.local/bin/agent-runner`. Install from DevEnvironment orchestration tooling.
+Expected location: `~/.local/bin/agent-runner`. Install from Lantern and required tooling.
 
 ## Quarantined Terminal Targets
 
@@ -132,7 +132,7 @@ This loses local inventory and audit projection data. It does not clean up Tempo
 |-------|------------------|
 | Doctor output is still dependency-focused | See [Doctor-state planning](../reference/doctor-state.md) |
 | Old tmux terminal rows may exist | They belong in quarantine output only |
-| Rust MCP runtime tools are disabled | Use DevEnvironment `devorch-mcp-client` |
+| Rust MCP runtime tools are disabled | Use the orchestration client |
 
 ## Legacy-Only Checks
 

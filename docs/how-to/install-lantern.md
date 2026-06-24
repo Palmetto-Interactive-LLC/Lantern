@@ -69,7 +69,7 @@ The installer configures iTerm2 helpers on macOS. You still need:
 |------|------------------------|
 | iTerm2 | `/Applications/iTerm.app`, Python API enabled |
 | `agent-runner` | `~/.local/bin/agent-runner` |
-| `devorch-mcp-client` | Agent MCP settings |
+| Orchestration client | Agent MCP configuration |
 | Agent CLI | `claude`, `agy`, `codex`, or `kimi` on PATH |
 | git | System PATH |
 

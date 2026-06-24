@@ -41,7 +41,7 @@ SQLite can cache projections for display, but doctor-state must distinguish proj
 - git available
 - iTerm2 installed and Python API reachable on macOS
 - `agent-runner` available
-- `devorch-mcp-client` configured for each agent CLI
+- Orchestration client configured for each agent CLI
 
 The shell doctor checks iTerm, runner, and MCP readiness. Legacy tmux binary checks are intentionally excluded from current runtime diagnostics.
 

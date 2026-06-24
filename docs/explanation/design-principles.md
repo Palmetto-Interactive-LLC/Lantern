@@ -26,9 +26,9 @@ iTerm2 is useful because operators need visible agent windows. It is not a messa
 
 Runtime delivery should target agent-runner-owned execution windows gated by Temporal workflow state. If iTerm target data is stale, doctor-state should report it as diagnostic information.
 
-## MCP Runtime Belongs to DevEnvironment
+## MCP Runtime Uses the Orchestration Layer
 
-Agents should use DevEnvironment `devorch-mcp-client` for runtime MCP operations. That client maps status updates, peer messages, setup instructions, team-state reads, and human-control operations to Temporal workflow Updates, Signals, and Queries.
+Agents should use the orchestration client for runtime MCP operations. That client maps status updates, peer messages, setup instructions, team-state reads, and human-control operations to Temporal workflow Updates, Signals, and Queries.
 
 Lantern Rust MCP remains compatibility-only and must not expose local runtime tools.
 

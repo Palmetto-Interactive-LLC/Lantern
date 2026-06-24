@@ -8,7 +8,7 @@ Launch a 9-agent coding squad with git worktrees, iTerm2 display panes, agent pr
 - macOS with iTerm2 and the iTerm2 Python API enabled
 - Current directory inside a git repository
 - `agent-runner` at `~/.local/bin/agent-runner`
-- DevEnvironment `devorch-mcp-client` configured in agent MCP settings
+- Orchestration client configured in your agent's MCP settings
 - Agent CLI on PATH
 
 Squads open in a new iTerm2 window with nine native split panes. iTerm is display and lifecycle support only; runtime delivery and control go through Temporal workflows.
@@ -101,8 +101,8 @@ Orchestrator uses the repo root. Other roles use dedicated worktrees.
 | Worktree root exists | Clean up `.claude/worktrees/{session-id}/` or use a different slot |
 | Not inside git repo | `cd` into a directory with `.git` |
 | iTerm Python API unavailable | Enable iTerm2 Python API and run `lantern-setup-iterm` |
-| `agent-runner` not found | Install DevEnvironment orchestration tooling |
-| MCP readiness missing | Verify `devorch-mcp-client` in agent MCP settings |
+| `agent-runner` not found | Install Lantern and required tooling |
+| MCP readiness missing | Verify orchestration client configured in agent MCP settings |
 
 For startup and readiness issues, see [How to troubleshoot issues](troubleshoot-issues.md).
 

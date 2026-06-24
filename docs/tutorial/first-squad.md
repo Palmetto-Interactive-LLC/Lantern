@@ -12,7 +12,7 @@ You need:
 - A git repository to work in
 - git on your PATH
 - `agent-runner` at `~/.local/bin/agent-runner`
-- DevEnvironment `devorch-mcp-client` configured in agent MCP settings
+- Orchestration client configured in your agent's MCP settings
 - At least one agent CLI (`claude` recommended)
 
 If you are unsure whether prerequisites are met, run the installer. It checks most local dependencies and installs the helper scripts.

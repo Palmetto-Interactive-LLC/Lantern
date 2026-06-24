@@ -1,6 +1,6 @@
 # Public Release Security & Exposure Review
 
-**Repository:** `Palmetto-Interactive-LLC/pi-code-orchestrator` (Lantern)
+**Repository:** `Palmetto-Interactive-LLC/Lantern` (Lantern)
 **Review type:** Pre-public-release secret, sensitive-data, and public-exposure audit
 **Reviewer role:** Security specialist (`sec`)
 **Date:** 2026-06-23

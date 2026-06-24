@@ -27,7 +27,7 @@ and SHA-pinned action control over the UI-managed default).
 
 **Verify:**
 ```bash
-gh api repos/Palmetto-Interactive-LLC/pi-code-orchestrator --jq '.security_and_analysis.code_security'
+gh api repos/Palmetto-Interactive-LLC/Lantern --jq '.security_and_analysis.code_security'
 # Should show: {"status":"enabled"} after GHAS or public flip
 ```
 
@@ -40,7 +40,7 @@ and remain active after the visibility change. Confirm they survive the flip.
 
 **Verify immediately after going public:**
 ```bash
-gh api repos/Palmetto-Interactive-LLC/pi-code-orchestrator \
+gh api repos/Palmetto-Interactive-LLC/Lantern \
   --jq '.security_and_analysis | {secret_scanning: .secret_scanning.status, push_protection: .secret_scanning_push_protection.status}'
 # Both should still show "enabled"
 ```
@@ -48,7 +48,7 @@ gh api repos/Palmetto-Interactive-LLC/pi-code-orchestrator \
 If either reverts to disabled:
 ```bash
 printf '{"security_and_analysis":{"secret_scanning":{"status":"enabled"},"secret_scanning_push_protection":{"status":"enabled"}}}' | \
-  gh api -X PATCH repos/Palmetto-Interactive-LLC/pi-code-orchestrator --input -
+  gh api -X PATCH repos/Palmetto-Interactive-LLC/Lantern --input -
 ```
 
 ---
@@ -65,7 +65,7 @@ UI: Settings → Security → Private vulnerability reporting → Enable
 
 Or via API:
 ```bash
-gh api -X PUT repos/Palmetto-Interactive-LLC/pi-code-orchestrator/private-vulnerability-reporting 2>&1
+gh api -X PUT repos/Palmetto-Interactive-LLC/Lantern/private-vulnerability-reporting 2>&1
 # HTTP 204 = success
 ```
 
@@ -82,7 +82,7 @@ public — GitHub will surface it automatically.
 
 **Verify:**
 ```
-UI: https://github.com/Palmetto-Interactive-LLC/pi-code-orchestrator/security/policy
+UI: https://github.com/Palmetto-Interactive-LLC/Lantern/security/policy
     → Should display SECURITY.md content
 ```
 
@@ -101,7 +101,7 @@ UI: Security tab → Advisories → "New draft security advisory"
 
 Or list existing advisories:
 ```bash
-gh api repos/Palmetto-Interactive-LLC/pi-code-orchestrator/security-advisories --jq '.[].ghsa_id'
+gh api repos/Palmetto-Interactive-LLC/Lantern/security-advisories --jq '.[].ghsa_id'
 ```
 
 ---
@@ -113,7 +113,7 @@ Dependabot vulnerability alerts are already enabled — confirm dependency graph
 
 **Verify:**
 ```bash
-gh api repos/Palmetto-Interactive-LLC/pi-code-orchestrator/dependency-graph/sbom \
+gh api repos/Palmetto-Interactive-LLC/Lantern/dependency-graph/sbom \
   --jq '.sbom.name' 2>&1
 # Returns repo name if dependency graph is active
 ```
@@ -167,7 +167,7 @@ SECURITY, ISSUE_TEMPLATE, PR_TEMPLATE, CODEOWNERS.
 
 **Verify after going public:**
 ```
-UI: https://github.com/Palmetto-Interactive-LLC/pi-code-orchestrator/community
+UI: https://github.com/Palmetto-Interactive-LLC/Lantern/community
     → All green checklist items
 ```
 
@@ -203,7 +203,7 @@ UI: Settings → Pages → Source → "Deploy from a branch"
 Or via API:
 ```bash
 printf '{"source":{"branch":"main","path":"/docs"}}' | \
-  gh api -X POST repos/Palmetto-Interactive-LLC/pi-code-orchestrator/pages --input -
+  gh api -X POST repos/Palmetto-Interactive-LLC/Lantern/pages --input -
 ```
 
 The `docs/` directory already exists with structured documentation (getting-started, reference,
@@ -219,7 +219,7 @@ Social preview images appear in link unfurls (Slack, Twitter/X, LinkedIn) — on
 
 **Set topics:**
 ```bash
-gh api -X PUT repos/Palmetto-Interactive-LLC/pi-code-orchestrator/topics \
+gh api -X PUT repos/Palmetto-Interactive-LLC/Lantern/topics \
   --field names[]="rust" \
   --field names[]="cli" \
   --field names[]="orchestration" \
@@ -232,7 +232,7 @@ gh api -X PUT repos/Palmetto-Interactive-LLC/pi-code-orchestrator/topics \
 
 **Set description** (already set, verify):
 ```bash
-gh api repos/Palmetto-Interactive-LLC/pi-code-orchestrator --jq '.description'
+gh api repos/Palmetto-Interactive-LLC/Lantern --jq '.description'
 ```
 
 **Social preview:**
@@ -282,7 +282,7 @@ jobs:
 
 Add badge to README once score is published:
 ```markdown
-[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/Palmetto-Interactive-LLC/pi-code-orchestrator/badge)](https://scorecard.dev/viewer/?uri=github.com/Palmetto-Interactive-LLC/pi-code-orchestrator)
+[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/Palmetto-Interactive-LLC/Lantern/badge)](https://scorecard.dev/viewer/?uri=github.com/Palmetto-Interactive-LLC/Lantern)
 ```
 
 ---
@@ -309,7 +309,7 @@ repo visibility changes in edge cases. Verify immediately after going public.
 
 **Verify:**
 ```bash
-gh api repos/Palmetto-Interactive-LLC/pi-code-orchestrator/branches/main/protection \
+gh api repos/Palmetto-Interactive-LLC/Lantern/branches/main/protection \
   --jq '{force_push: .allow_force_pushes.enabled, deletions: .allow_deletions.enabled, linear: .required_linear_history.enabled, pr_required: .required_pull_request_reviews.required_approving_review_count, status_checks: .required_status_checks.contexts}'
 # Expected: force_push=false, deletions=false, linear=true, pr_required=1, status_checks=["Rust fmt"]
 ```
@@ -324,7 +324,7 @@ printf '{
   "allow_force_pushes": false,
   "allow_deletions": false,
   "required_linear_history": true
-}' | gh api -X PUT repos/Palmetto-Interactive-LLC/pi-code-orchestrator/branches/main/protection --input -
+}' | gh api -X PUT repos/Palmetto-Interactive-LLC/Lantern/branches/main/protection --input -
 ```
 
 ---

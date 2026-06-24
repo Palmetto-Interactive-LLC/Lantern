@@ -112,14 +112,14 @@ async def configure_iterm_for_squads(connection: iterm2.Connection) -> None:
         try:
             await iterm2.async_set_preference(connection, key, value)
         except Exception:
-            pass
+            continue  # unsupported preference key in this iTerm2 version — non-fatal
 
 
 async def hide_window_toolbelt(window: iterm2.Window) -> None:
     try:
         await window.async_invoke_function("iterm2.toolbelt_hide()", timeout=2)
     except Exception:
-        pass
+        return  # toolbelt hide is best-effort; not all iTerm2 versions expose this API
 
 
 async def apply_layout_sizes(
@@ -146,7 +146,7 @@ async def apply_layout_sizes(
     try:
         await tab.async_update_layout()
     except Exception:
-        pass
+        return  # layout update is best-effort; pane sizes may be approximate
 
 
 async def find_session(app: iterm2.App, session_id: str) -> iterm2.Session | None:

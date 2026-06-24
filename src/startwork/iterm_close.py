@@ -10,7 +10,6 @@ Usage:
 """
 
 import argparse
-import asyncio
 import sys
 
 import iterm2

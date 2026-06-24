@@ -9,7 +9,6 @@ JSON format: { "<iterm_session_id>": "ORCH - m7-navi-52", ... }
 """
 
 import argparse
-import asyncio
 import json
 import sys
 from pathlib import Path

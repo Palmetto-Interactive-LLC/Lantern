@@ -7,6 +7,8 @@ stdout so the Rust caller can register and later close it.
 """
 import argparse
 import json
+import sys
+
 import iterm2
 
 _p = argparse.ArgumentParser()
@@ -17,13 +19,13 @@ ARGS = _p.parse_args()
 
 
 async def main(connection):
-    app = await iterm2.async_get_app(connection)
+    await iterm2.async_get_app(connection)
     window = await iterm2.Window.async_create(connection)
     session = window.current_tab.current_session
     try:
         await session.async_set_name(ARGS.title)
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"WARN: could not set pane title: {e}", file=sys.stderr)
     # cd into the worktree, then launch the (interactive) agent command. A single
     # trailing newline submits at the fresh shell prompt.
     await session.async_send_text("cd " + json.dumps(ARGS.cwd) + " && " + ARGS.command + "\n")

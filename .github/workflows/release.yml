@@ -15,51 +15,43 @@ permissions:
 
 jobs:
   build:
-    name: Build ${{ matrix.target }}
-    runs-on: ${{ matrix.os }}
+    name: Build macOS binaries
+    runs-on: macos-latest
     permissions:
       contents: read
-    strategy:
-      fail-fast: true
-      matrix:
-        include:
-          - target: aarch64-apple-darwin
-            os: macos-14
-          - target: x86_64-apple-darwin
-            os: macos-13
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
       - uses: dtolnay/rust-toolchain@67ef31d5b988238dd797d409d6f9574278e20537 # master
         with:
           toolchain: stable
-          targets: ${{ matrix.target }}
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
 
       - name: Install protobuf compiler
         run: brew install protobuf
 
-      - name: Build release binary
-        run: cargo build --release --target ${{ matrix.target }}
+      - name: Build aarch64-apple-darwin
+        run: cargo build --release --target aarch64-apple-darwin
+
+      - name: Build x86_64-apple-darwin
+        run: cargo build --release --target x86_64-apple-darwin
 
       - name: Package
         shell: bash
         run: |
-          TAG="${{ github.ref_name }}"
-          if [[ "$TAG" == "refs/heads/"* ]]; then
-            TAG="${{ github.event.inputs.tag }}"
-          fi
-          ASSET="lantern-${TAG}-${{ matrix.target }}"
+          TAG="${{ github.event.inputs.tag || github.ref_name }}"
           mkdir -p dist
-          cp "target/${{ matrix.target }}/release/lantern" "dist/lantern"
-          tar -czf "dist/${ASSET}.tar.gz" -C dist lantern
-          rm dist/lantern
-          cd dist
-          shasum -a 256 "${ASSET}.tar.gz" > "${ASSET}.tar.gz.sha256"
-          echo "ASSET=${ASSET}" >> "$GITHUB_ENV"
+          for TARGET in aarch64-apple-darwin x86_64-apple-darwin; do
+            ASSET="lantern-${TAG}-${TARGET}"
+            cp "target/${TARGET}/release/lantern" dist/lantern
+            tar -czf "dist/${ASSET}.tar.gz" -C dist lantern
+            rm dist/lantern
+            (cd dist && shasum -a 256 "${ASSET}.tar.gz") >> dist/SHA256SUMS
+          done
 
       - uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
         with:
-          name: ${{ env.ASSET }}
+          name: lantern-binaries
           path: dist/
           retention-days: 1
 
@@ -74,25 +66,20 @@ jobs:
 
       - uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16 # v4.1.8
         with:
+          name: lantern-binaries
           path: dist/
-          merge-multiple: true
 
-      - name: Build SHA256SUMS
-        run: |
-          cd dist
-          cat *.sha256 > SHA256SUMS
-          rm -f *.sha256
-
-      - name: Create GitHub Release
+      - name: Create or update GitHub Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          TAG="${{ github.ref_name }}"
-          if [[ "$TAG" == "refs/heads/"* ]]; then
-            TAG="${{ github.event.inputs.tag }}"
+          TAG="${{ github.event.inputs.tag || github.ref_name }}"
+          if gh release view "${TAG}" >/dev/null 2>&1; then
+            gh release upload "${TAG}" dist/*.tar.gz dist/SHA256SUMS --clobber
+          else
+            gh release create "${TAG}" \
+              --title "Lantern ${TAG}" \
+              --generate-notes \
+              dist/*.tar.gz \
+              dist/SHA256SUMS
           fi
-          gh release create "${TAG}" \
-            --title "Lantern ${TAG}" \
-            --generate-notes \
-            dist/*.tar.gz \
-            dist/SHA256SUMS

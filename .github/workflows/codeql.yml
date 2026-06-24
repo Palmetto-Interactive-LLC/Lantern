@@ -16,9 +16,6 @@ jobs:
   analyze:
     name: Analyze (${{ matrix.language }})
     runs-on: ubuntu-latest
-    # Non-blocking on private repos without GHAS: SARIF upload requires public
-    # visibility or a GHAS license. Analysis still runs; results upload once public.
-    continue-on-error: true
     strategy:
       fail-fast: false
       matrix:

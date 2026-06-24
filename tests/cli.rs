@@ -120,6 +120,5 @@ fn test_relay_daemon_starts() {
         let _ = child.kill();
     }
 
-    let _ = child.kill();
     let _ = child.wait();
 }

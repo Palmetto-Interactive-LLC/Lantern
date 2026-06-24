@@ -24,7 +24,7 @@ bytes = "1"
 http = "1"
 uuid = { version = "1", features = ["v4", "serde"] }
 hostname = "0.4"
-toml = "0.8"
+toml = "1.1"
 iterm2 = "0.2.1"
 temporal-sdk-core-protos = "0.1.0"
 hex = "0.4.3"

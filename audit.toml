@@ -1,0 +1,11 @@
+[advisories]
+ignore = [
+    # RUSTSEC-2023-0071: Marvin Attack in rsa 0.9.x (CVSS 5.9 MEDIUM)
+    # Pulled in transitively via sqlx → sqlx-mysql → rsa.
+    # Lantern connects exclusively over SQLite (sqlite:// URLs only); the
+    # sqlx-mysql driver and the rsa crate are compiled in but never exercised
+    # at runtime. No RSA key material is processed by this binary.
+    # No upstream fix available as of 2026-06-23. Re-evaluate when rsa >= 0.10
+    # or sqlx drops the mysql feature.
+    "RUSTSEC-2023-0071",
+]

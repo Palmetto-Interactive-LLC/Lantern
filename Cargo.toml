@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2021"
 authors = ["Lantern Team"]
 description = "Native local orchestration runtime for terminal AI coding squads"
+license = "Apache-2.0"
 
 [dependencies]
 tokio = { version = "1", features = ["full"] }

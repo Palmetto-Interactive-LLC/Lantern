@@ -50,7 +50,11 @@ fn test_cli_version() {
 
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("0.1.0"), "version should be 0.1.0");
+    let expected = env!("CARGO_PKG_VERSION");
+    assert!(
+        stdout.contains(expected),
+        "version output should contain {expected}"
+    );
 }
 
 #[test]

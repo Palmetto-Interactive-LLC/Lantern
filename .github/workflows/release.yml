@@ -1,0 +1,98 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to release (e.g. v2026.6.0)'
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - target: aarch64-apple-darwin
+            os: macos-14
+          - target: x86_64-apple-darwin
+            os: macos-13
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - uses: dtolnay/rust-toolchain@67ef31d5b988238dd797d409d6f9574278e20537 # master
+        with:
+          toolchain: 1.86.0
+          targets: ${{ matrix.target }}
+
+      - name: Install protobuf compiler
+        run: brew install protobuf
+
+      - name: Build release binary
+        run: cargo build --release --target ${{ matrix.target }}
+
+      - name: Package
+        shell: bash
+        run: |
+          TAG="${{ github.ref_name }}"
+          if [[ "$TAG" == "refs/heads/"* ]]; then
+            TAG="${{ github.event.inputs.tag }}"
+          fi
+          ASSET="lantern-${TAG}-${{ matrix.target }}"
+          mkdir -p dist
+          cp "target/${{ matrix.target }}/release/lantern" "dist/lantern"
+          tar -czf "dist/${ASSET}.tar.gz" -C dist lantern
+          rm dist/lantern
+          cd dist
+          shasum -a 256 "${ASSET}.tar.gz" > "${ASSET}.tar.gz.sha256"
+          echo "ASSET=${ASSET}" >> "$GITHUB_ENV"
+
+      - uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
+        with:
+          name: ${{ env.ASSET }}
+          path: dist/
+          retention-days: 1
+
+  release:
+    name: Publish release
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16 # v4.1.8
+        with:
+          path: dist/
+          merge-multiple: true
+
+      - name: Build SHA256SUMS
+        run: |
+          cd dist
+          cat *.sha256 > SHA256SUMS
+          rm -f *.sha256
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${{ github.ref_name }}"
+          if [[ "$TAG" == "refs/heads/"* ]]; then
+            TAG="${{ github.event.inputs.tag }}"
+          fi
+          gh release create "${TAG}" \
+            --title "Lantern ${TAG}" \
+            --generate-notes \
+            dist/*.tar.gz \
+            dist/SHA256SUMS

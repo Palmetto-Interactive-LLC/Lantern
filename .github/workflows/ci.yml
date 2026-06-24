@@ -10,22 +10,43 @@ permissions:
   contents: read
 
 jobs:
-  rust-fmt:
+  fmt:
     name: Rust fmt
     runs-on: ubuntu-latest
     permissions:
       contents: read
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-      # Pinned to SHA — a floating @master drifted and produced spurious failures on unchanged code.
       - uses: dtolnay/rust-toolchain@67ef31d5b988238dd797d409d6f9574278e20537 # master
         with:
-          toolchain: 1.95.0
+          toolchain: 1.86.0
           components: rustfmt
       - run: cargo fmt --check
-      # NOTE: cargo check / clippy / test are intentionally omitted for now —
-      # the sqlx-backed build needs a reproducible CI build env (a DB service
-      # and/or a committed .sqlx offline cache). Tracked in beads as a follow-up.
-      #
-      # The TypeScript typecheck job was removed: this is a Rust-only repo
-      # (no package.json / .ts files), so that job could never pass.
+
+  clippy:
+    name: Clippy
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: dtolnay/rust-toolchain@67ef31d5b988238dd797d409d6f9574278e20537 # master
+        with:
+          toolchain: stable
+          components: clippy
+      - run: sudo apt-get install -y protobuf-compiler
+      - run: cargo clippy --all-targets
+
+  build-test:
+    name: Build & Test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: dtolnay/rust-toolchain@67ef31d5b988238dd797d409d6f9574278e20537 # master
+        with:
+          toolchain: stable
+      - run: sudo apt-get install -y protobuf-compiler
+      - run: cargo build --release
+      - run: cargo test

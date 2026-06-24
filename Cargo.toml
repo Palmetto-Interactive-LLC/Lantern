@@ -1,6 +1,6 @@
 [package]
 name = "lantern"
-version = "0.1.0"
+version = "2026.6.0"
 edition = "2021"
 authors = ["Lantern Team"]
 description = "Native local orchestration runtime for terminal AI coding squads"

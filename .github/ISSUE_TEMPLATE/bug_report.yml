@@ -1,0 +1,101 @@
+name: Bug report
+description: Report a reproducible defect.
+title: "[Bug]: "
+labels:
+  - "type:bug"
+  - needs-triage
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Type:** Bug. Mirrors Beads `bug`.
+        Use this only for a reproducible defect in existing behavior.
+  - type: dropdown
+    id: item_type
+    attributes:
+      label: Item type
+      description: Keep this aligned with the GitHub label and Beads type.
+      options:
+        - Bug
+    validations:
+      required: true
+  - type: checkboxes
+    id: searched
+    attributes:
+      label: Pre-flight
+      description: Confirm this is not already tracked.
+      options:
+        - label: I searched existing GitHub issues and Beads before filing.
+          required: true
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: What is broken?
+      placeholder: A concise description of the defect.
+    validations:
+      required: true
+  - type: dropdown
+    id: severity
+    attributes:
+      label: Severity
+      description: Choose the highest severity that applies.
+      options:
+        - S0 - Production outage or data loss
+        - S1 - Major user-facing regression
+        - S2 - Broken workflow with workaround
+        - S3 - Minor defect or polish
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: Provide exact steps, fixtures, accounts, or commands.
+      value: |
+        1.
+        2.
+        3.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      description: What should have happened?
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: What happened instead?
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Include versions, browser/device, service, branch, and deployment environment.
+      value: |
+        - Environment:
+        - Browser/device:
+        - App/service version or commit:
+        - Account/tenant type:
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs or screenshots
+      description: Paste relevant logs, screenshots, traces, or request IDs. Remove secrets and personal data.
+      render: shell
+    validations:
+      required: false
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: Add links, suspected cause, or related Beads/GitHub issue IDs.
+    validations:
+      required: false

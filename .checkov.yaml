@@ -1,0 +1,15 @@
+compact: true
+download-external-modules: false
+evaluate-variables: true
+framework:
+  - terraform
+  - github_actions
+  - dockerfile
+  - kubernetes
+output:
+  - cli
+quiet: true
+skip-check:
+  # Template IAM policies intentionally contain placeholders and scoped starter
+  # resources that must be narrowed by the generated repository owner.
+  - CKV_AWS_355

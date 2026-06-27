@@ -1,0 +1,78 @@
+name: Issue
+description: File general work that is not yet clearly a bug, feature, or epic.
+title: "[Issue]: "
+labels:
+  - "type:issue"
+  - needs-triage
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Type:** Issue. Mirrors Beads `task`.
+        Use this for general work that should be triaged before implementation.
+  - type: dropdown
+    id: item_type
+    attributes:
+      label: Item type
+      description: Human-facing issue maps to Beads `task`.
+      options:
+        - Issue
+    validations:
+      required: true
+  - type: checkboxes
+    id: searched
+    attributes:
+      label: Pre-flight
+      options:
+        - label: I searched existing GitHub issues and Beads before filing.
+          required: true
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: What needs attention?
+    validations:
+      required: true
+  - type: textarea
+    id: impact
+    attributes:
+      label: Impact
+      description: Who is affected, how often, and why does it matter?
+    validations:
+      required: true
+  - type: textarea
+    id: desired_next_step
+    attributes:
+      label: Desired next step
+      description: What decision, investigation, or implementation work should happen next?
+    validations:
+      required: true
+  - type: dropdown
+    id: urgency
+    attributes:
+      label: Urgency
+      options:
+        - P2 - Normal
+        - P0 - Critical
+        - P1 - High
+        - P3 - Low
+        - P4 - Backlog
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: What would make this item complete after triage?
+      value: |
+        - [ ]
+        - [ ]
+    validations:
+      required: false
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: Add screenshots, links, constraints, related Beads IDs, or GitHub issues.
+    validations:
+      required: false

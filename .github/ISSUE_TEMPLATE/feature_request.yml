@@ -1,0 +1,73 @@
+name: Feature request
+description: Propose a new capability or meaningful behavior change.
+title: "[Feature]: "
+labels:
+  - "type:feature"
+  - needs-triage
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Type:** Feature. Mirrors Beads `feature`.
+        Use this for a new capability or meaningful behavior change.
+  - type: dropdown
+    id: item_type
+    attributes:
+      label: Item type
+      description: Keep this aligned with the GitHub label and Beads type.
+      options:
+        - Feature
+    validations:
+      required: true
+  - type: checkboxes
+    id: searched
+    attributes:
+      label: Pre-flight
+      options:
+        - label: I searched existing GitHub issues and Beads before filing.
+          required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What user or operational problem should this solve?
+    validations:
+      required: true
+  - type: textarea
+    id: outcome
+    attributes:
+      label: Desired outcome
+      description: Describe the result, not just an implementation.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed approach
+      description: Share the smallest useful shape of the feature.
+    validations:
+      required: false
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: What workarounds or other designs have you considered?
+    validations:
+      required: false
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: How will we know this is done?
+      value: |
+        - [ ]
+        - [ ]
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: Add screenshots, links, constraints, or related Beads/GitHub issue IDs.
+    validations:
+      required: false

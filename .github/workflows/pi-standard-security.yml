@@ -1,0 +1,336 @@
+name: PI Standard Security
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "19 8 * * 1"
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  ACTIONLINT_VERSION: 1.7.12
+  CHECKOV_VERSION: 3.3.2
+  GITLEAKS_VERSION: 8.30.1
+  GRYPE_VERSION: 0.115.0
+  OSV_SCANNER_VERSION: 2.4.0
+  SEMGREP_VERSION: 1.168.0
+  TRIVY_IMAGE_REF: ${{ vars.TRIVY_IMAGE_REF }}
+  TRIVY_VERSION: 0.71.2
+  ZIZMOR_VERSION: 1.26.1
+
+jobs:
+  secrets-scan:
+    name: secrets-scan
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Install gitleaks
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/gitleaks" "$GITHUB_WORKSPACE/reports"
+          artifact="gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          base_url="https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}"
+          curl -fsSLo "$RUNNER_TEMP/$artifact" "$base_url/$artifact"
+          curl -fsSLo "$RUNNER_TEMP/gitleaks_checksums.txt" "$base_url/gitleaks_${GITLEAKS_VERSION}_checksums.txt"
+          grep "  $artifact$" "$RUNNER_TEMP/gitleaks_checksums.txt" | (cd "$RUNNER_TEMP" && sha256sum -c -)
+          tar -xzf "$RUNNER_TEMP/$artifact" -C "$RUNNER_TEMP/gitleaks" gitleaks
+          echo "$RUNNER_TEMP/gitleaks" >> "$GITHUB_PATH"
+
+      - name: secrets-scan
+        shell: bash
+        run: |
+          set -euo pipefail
+          gitleaks detect \
+            --source . \
+            --redact \
+            --report-format json \
+            --report-path reports/gitleaks.json
+
+      - name: Upload secrets scan report
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: security-secrets-scan
+          path: reports/gitleaks.json
+          if-no-files-found: ignore
+
+  sast:
+    name: sast
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
+
+      - name: Install Semgrep
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m pip install --user "semgrep==${SEMGREP_VERSION}"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          mkdir -p reports
+
+      - name: sast
+        shell: bash
+        run: |
+          set -euo pipefail
+          semgrep scan \
+            --config p/ci \
+            --config p/security-audit \
+            --metrics=off \
+            --error \
+            --exclude .beads \
+            --exclude .git \
+            --exclude node_modules \
+            --exclude dist \
+            --exclude build \
+            --sarif \
+            --output reports/semgrep.sarif \
+            .
+
+      - name: Upload SAST report
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: security-sast
+          path: reports/semgrep.sarif
+          if-no-files-found: ignore
+
+  deps-scan:
+    name: deps-scan
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
+
+      - name: Install OSV Scanner
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/osv" "$GITHUB_WORKSPACE/reports"
+          base_url="https://github.com/google/osv-scanner/releases/download/v${OSV_SCANNER_VERSION}"
+          curl -fsSLo "$RUNNER_TEMP/osv-scanner" "$base_url/osv-scanner_linux_amd64"
+          curl -fsSLo "$RUNNER_TEMP/osv-scanner_SHA256SUMS" "$base_url/osv-scanner_SHA256SUMS"
+          grep "  osv-scanner_linux_amd64$" "$RUNNER_TEMP/osv-scanner_SHA256SUMS" | sed "s/osv-scanner_linux_amd64/osv-scanner/" | (cd "$RUNNER_TEMP" && sha256sum -c -)
+          chmod +x "$RUNNER_TEMP/osv-scanner"
+          mv "$RUNNER_TEMP/osv-scanner" "$RUNNER_TEMP/osv/osv-scanner"
+          echo "$RUNNER_TEMP/osv" >> "$GITHUB_PATH"
+
+      - name: Install grype
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/grype"
+          artifact="grype_${GRYPE_VERSION}_linux_amd64.tar.gz"
+          base_url="https://github.com/anchore/grype/releases/download/v${GRYPE_VERSION}"
+          curl -fsSLo "$RUNNER_TEMP/$artifact" "$base_url/$artifact"
+          curl -fsSLo "$RUNNER_TEMP/grype_checksums.txt" "$base_url/grype_${GRYPE_VERSION}_checksums.txt"
+          grep "  $artifact$" "$RUNNER_TEMP/grype_checksums.txt" | (cd "$RUNNER_TEMP" && sha256sum -c -)
+          tar -xzf "$RUNNER_TEMP/$artifact" -C "$RUNNER_TEMP/grype" grype
+          echo "$RUNNER_TEMP/grype" >> "$GITHUB_PATH"
+
+      - name: deps-scan
+        shell: bash
+        run: |
+          set -euo pipefail
+          package_sources=$(
+            find . \
+              -path ./.git -prune -o \
+              -path ./.beads -prune -o \
+              -path ./node_modules -prune -o \
+              \( \
+                -name package-lock.json -o \
+                -name pnpm-lock.yaml -o \
+                -name yarn.lock -o \
+                -name npm-shrinkwrap.json -o \
+                -name go.mod -o \
+                -name go.sum -o \
+                -name Cargo.lock -o \
+                -name requirements.txt -o \
+                -name poetry.lock -o \
+                -name Pipfile.lock -o \
+                -name Gemfile.lock -o \
+                -name composer.lock \
+              \) -print
+          )
+          if [ -n "$package_sources" ]; then
+            osv-scanner scan source -r . --format json --output-file reports/osv-scanner.json
+          else
+            printf '{"results":[]}\n' > reports/osv-scanner.json
+            echo "No supported package sources found; wrote an empty OSV report."
+          fi
+          grype dir:. --fail-on high --output json --file reports/grype.json
+
+      - name: Upload dependency scan reports
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: security-deps-scan
+          path: |
+            reports/osv-scanner.json
+            reports/grype.json
+          if-no-files-found: ignore
+
+  iac-scan:
+    name: iac-scan
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
+
+      - name: Install Trivy and Checkov
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/trivy" "$GITHUB_WORKSPACE/reports"
+          artifact="trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz"
+          base_url="https://github.com/aquasecurity/trivy/releases/download/v${TRIVY_VERSION}"
+          curl -fsSLo "$RUNNER_TEMP/$artifact" "$base_url/$artifact"
+          curl -fsSLo "$RUNNER_TEMP/trivy_checksums.txt" "$base_url/trivy_${TRIVY_VERSION}_checksums.txt"
+          grep "  $artifact$" "$RUNNER_TEMP/trivy_checksums.txt" | (cd "$RUNNER_TEMP" && sha256sum -c -)
+          tar -xzf "$RUNNER_TEMP/$artifact" -C "$RUNNER_TEMP/trivy" trivy
+          echo "$RUNNER_TEMP/trivy" >> "$GITHUB_PATH"
+          python3 -m pip install --user "checkov==${CHECKOV_VERSION}"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: iac-scan
+        shell: bash
+        run: |
+          set -euo pipefail
+          trivy fs \
+            --scanners vuln,secret,misconfig \
+            --severity HIGH,CRITICAL \
+            --exit-code 1 \
+            --skip-dirs .beads \
+            --skip-dirs .git \
+            --skip-dirs node_modules \
+            --format sarif \
+            --output reports/trivy-fs.sarif \
+            .
+          if [ -n "${TRIVY_IMAGE_REF:-}" ]; then
+            trivy image \
+              --severity HIGH,CRITICAL \
+              --exit-code 1 \
+              --format sarif \
+              --output reports/trivy-image.sarif \
+              "$TRIVY_IMAGE_REF"
+          fi
+          checkov -d . \
+            --quiet \
+            --compact \
+            --skip-path .beads \
+            --skip-path .git \
+            --skip-path node_modules \
+            --output cli \
+            | tee reports/checkov.txt
+
+      - name: Upload IaC scan reports
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: security-iac-scan
+          path: |
+            reports/trivy-fs.sarif
+            reports/trivy-image.sarif
+            reports/checkov.txt
+          if-no-files-found: ignore
+
+  actions-lint:
+    name: actions-lint
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
+
+      - name: Install actionlint and zizmor
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/actionlint" "$GITHUB_WORKSPACE/reports"
+          artifact="actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
+          base_url="https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}"
+          curl -fsSLo "$RUNNER_TEMP/$artifact" "$base_url/$artifact"
+          curl -fsSLo "$RUNNER_TEMP/actionlint_checksums.txt" "$base_url/actionlint_${ACTIONLINT_VERSION}_checksums.txt"
+          grep "  $artifact$" "$RUNNER_TEMP/actionlint_checksums.txt" | (cd "$RUNNER_TEMP" && sha256sum -c -)
+          tar -xzf "$RUNNER_TEMP/$artifact" -C "$RUNNER_TEMP/actionlint" actionlint
+          echo "$RUNNER_TEMP/actionlint" >> "$GITHUB_PATH"
+          python3 -m pip install --user "zizmor==${ZIZMOR_VERSION}"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: actions-lint
+        shell: bash
+        run: |
+          set -euo pipefail
+          actionlint -color=false .github/workflows/*.yml | tee reports/actionlint.txt
+          zizmor .github/workflows | tee reports/zizmor.txt
+
+      - name: Upload Actions lint reports
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: security-actions-lint
+          path: |
+            reports/actionlint.txt
+            reports/zizmor.txt
+          if-no-files-found: ignore
+
+  scorecard:
+    name: scorecard
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      checks: read
+      issues: read
+      pull-requests: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
+
+      - name: Run Scorecard without GHAS upload
+        continue-on-error: true
+        uses: ossf/scorecard-action@4eaacf0543bb3f2c246792bd56e8cdeffafb205a # v2.4.3
+        with:
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          results_file: reports/scorecard.sarif
+          results_format: sarif
+          publish_results: false
+
+      - name: Upload Scorecard artifact
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: security-scorecard
+          path: reports/scorecard.sarif
+          if-no-files-found: ignore

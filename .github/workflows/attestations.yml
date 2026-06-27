@@ -1,0 +1,49 @@
+name: "Attestations PUBLIC-REPO-ONLY"
+
+# PUBLIC-REPO-ONLY: artifact attestations are useful for published public
+# artifacts. Do not make this a required check for private template repositories.
+
+on:
+  workflow_dispatch:
+  release:
+    types: [published]
+
+permissions: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.release.tag_name || github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  attest-public-repo-only:
+    name: "Attestations PUBLIC-REPO-ONLY"
+    if: github.event.repository.private == false
+    runs-on: ubuntu-latest
+    permissions:
+      attestations: write
+      contents: read
+      id-token: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
+
+      - name: Build source artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          git archive --format tar.gz --output dist/source.tar.gz HEAD
+
+      - name: Attest source artifact
+        uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
+        with:
+          subject-path: dist/source.tar.gz
+
+      - name: Upload attested artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: attested-source
+          path: dist/source.tar.gz
+          if-no-files-found: error

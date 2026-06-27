@@ -1,0 +1,55 @@
+name: AI Review
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+permissions: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  ai-review:
+    name: ai-review
+    if: >-
+      ${{
+        vars.AI_REVIEW_PROVIDER == 'claude' &&
+        !github.event.pull_request.draft &&
+        github.event.pull_request.head.repo.full_name == github.repository
+      }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - name: Checkout pull request
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Claude PR review
+        uses: anthropics/claude-code-action@c3d45e8e941e1b2ad7b278c57482d9c5bf1f35b3 # v1.0.99
+        with:
+          # Default path: generated locally with `claude setup-token`, backed by
+          # the developer's Claude Pro/Max subscription rather than API-key billing.
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          # WIF alternative: remove the token line above, add job permission
+          # `id-token: write`, and set anthropic_organization_id plus
+          # anthropic_federation_rule_id after configuring federation.
+          plugin_marketplaces: "https://github.com/anthropics/claude-code.git"
+          plugins: "code-review@claude-code-plugins"
+          prompt: "/code-review:code-review ${{ github.repository }}/pull/${{ github.event.pull_request.number }}"
+          claude_args: "--model claude-sonnet-4-6"
+
+      # OpenAI alternative:
+      # - uses: openai/codex-action@23cb67af8fc4ecba6f6dd5cdc61e1800176aca61 # v1
+      #   with:
+      #     openai-api-key: ${{ secrets.OPENAI_API_KEY }}
+      #     prompt-file: .github/ai/review-prompt.md
+      #     output-file: codex-output.md
+      # Then post codex-output.md back to the PR with a SHA-pinned
+      # actions/github-script step and pull-requests: write.

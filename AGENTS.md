@@ -126,3 +126,18 @@ bd prime                # Refresh Beads context
 
 **Architecture in one line:** issues live in a local Dolt DB; sync uses `refs/dolt/data` on your git remote; `.beads/issues.jsonl` is a passive export. See https://github.com/gastownhall/beads/blob/main/docs/SYNC_CONCEPTS.md for details and anti-patterns.
 <!-- END BEADS CODEX SETUP -->
+
+## Review Guidelines
+
+Treat this repository as security-sensitive production software. Reviews should prioritize correctness, least privilege, release integrity, and whether the repository stays within the paid GitHub Team baseline without silently depending on GHAS or Enterprise-only features.
+
+- Flag any secret, token, account ID, ARN, real cluster name, or static cloud credential committed to the repo as P0.
+- Flag any `AWS_ACCESS_KEY_ID` or `AWS_SECRET_ACCESS_KEY` usage for deploys as P0; cloud deploy authentication should use OIDC role/federation flows.
+- Flag any unpinned GitHub Action (`uses:` not pinned to a full 40-character commit SHA with a version comment) as P0.
+- Flag broad IAM/cloud permissions such as `iam:*`, `*:*`, wildcard resources without a documented rationale, or production trust policies that accept every repo ref as P0.
+- Flag workflows that omit top-level `permissions: {}` or grant broader job permissions than the job uses as P1.
+- Flag any use of `pull_request_target` for model-driven review or code execution as P0.
+- Flag missing tests or verification for new scripts, rulesets, workflow behavior, infrastructure changes, or release changes as P1.
+- Flag direct human-review requirements that would deadlock a solo developer, such as required approving reviews or required CODEOWNERS review, as P1.
+- Flag production deployment paths that bypass protected `main`, immutable GitHub Releases with `v*` tags, environment branch/tag policies, or required status checks as P1.
+- Flag logging of secrets, PII, cloud tokens, OIDC tokens, or full GitHub event payloads as P1.

@@ -1,0 +1,14 @@
+rules:
+  template-injection:
+    config:
+      untrusted_contexts:
+        - github.event.pull_request.title
+        - github.event.pull_request.body
+        - github.event.issue.title
+        - github.event.issue.body
+        - github.head_ref
+        - github.ref_name
+  unpinned-uses:
+    config:
+      policies:
+        "*": hash-pin

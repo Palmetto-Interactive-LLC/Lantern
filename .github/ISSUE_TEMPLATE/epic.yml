@@ -1,76 +1,82 @@
 name: Epic
-description: Track a coordinated body of work across multiple issues.
-title: "Epic: "
+description: Define a large body of related work.
+title: "[Epic]: "
 labels:
-  - type:epic
-  - priority:p0
-  - status:ready
+  - "type:epic"
+  - needs-triage
 body:
   - type: markdown
     attributes:
       value: |
-        Use this form for top-level epics. Keep each section focused and concrete.
-  - type: textarea
-    id: summary
+        **Type:** Epic. Mirrors Beads `epic`.
+        Use this when the work should break down into multiple child items.
+  - type: dropdown
+    id: item_type
     attributes:
-      label: Summary
-      description: Briefly state what the epic is and why it matters.
-      placeholder: One-paragraph summary.
+      label: Item type
+      description: Keep this aligned with the GitHub label and Beads type.
+      options:
+        - Epic
     validations:
       required: true
-  - type: textarea
-    id: context
+  - type: checkboxes
+    id: searched
     attributes:
-      label: Context
-      description: Explain the background, constraints, and why the work is needed now.
-      placeholder: Relevant background, constraints, and problem statement.
+      label: Pre-flight
+      options:
+        - label: I searched existing GitHub issues and Beads before filing.
+          required: true
+  - type: textarea
+    id: mission
+    attributes:
+      label: Mission
+      description: What durable outcome should this epic produce?
     validations:
       required: true
   - type: textarea
     id: scope
     attributes:
       label: Scope
-      description: Describe what is in scope and what is explicitly out of scope.
-      placeholder: In-scope and out-of-scope items.
+      description: What is included and excluded?
+      value: |
+        Included:
+        -
+
+        Excluded:
+        -
     validations:
       required: true
   - type: textarea
-    id: acceptance_criteria
+    id: child_work
     attributes:
-      label: Acceptance Criteria
-      description: List the observable outcomes required for completion.
-      placeholder: Use a markdown checklist if helpful.
+      label: Expected child work
+      description: List likely features, issues, bugs, or spikes this epic will contain.
+      value: |
+        - [ ]
+        - [ ]
     validations:
       required: true
   - type: textarea
-    id: verification
+    id: success_criteria
     attributes:
-      label: Verification
-      description: Describe the checks that prove the epic is complete.
-      placeholder: Commands, tests, reviews, or evidence requirements.
+      label: Success criteria
+      description: What must be true before the epic can close?
+      value: |
+        - [ ]
+        - [ ]
     validations:
       required: true
   - type: textarea
-    id: dependencies
+    id: risks
     attributes:
-      label: Dependencies
-      description: List blocking issues, repositories, migrations, or decisions.
-      placeholder: "#1, related issues, external dependencies."
+      label: Risks and dependencies
+      description: Note known blockers, sequencing, rollout risks, or external dependencies.
     validations:
-      required: true
+      required: false
   - type: textarea
-    id: owned_files
+    id: context
     attributes:
-      label: Owned Files
-      description: List the files, directories, or modules this epic owns.
-      placeholder: ".github/**, src/**, docs/**"
+      label: Additional context
+      description: Add links, constraints, related Beads IDs, or GitHub issues.
     validations:
-      required: true
-  - type: textarea
-    id: issue_breakdown
-    attributes:
-      label: Issue Breakdown
-      description: Break the epic into waves or sub-issues.
-      placeholder: Use issue numbers, waves, and short descriptions.
-    validations:
-      required: true
+      required: false

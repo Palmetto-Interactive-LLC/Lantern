@@ -1,0 +1,17 @@
+title = "pi-template gitleaks config"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Template placeholders and documentation-only examples"
+regexes = [
+  '''ACCOUNT_ID''',
+  '''ORG/REPO''',
+  '''OWNER/REPO''',
+  '''AWS_DEPLOY_ROLE_ARN''',
+  '''CLAUDE_CODE_OAUTH_TOKEN''',
+  '''OPENAI_API_KEY''',
+  '''token\.actions\.githubusercontent\.com''',
+  '''arn:aws:iam::ACCOUNT_ID:oidc-provider/token\.actions\.githubusercontent\.com'''
+]

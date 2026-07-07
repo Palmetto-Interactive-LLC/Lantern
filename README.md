@@ -86,6 +86,8 @@ make security
 
 For support expectations and issue-reporting details, see [SUPPORT.md](SUPPORT.md).
 
+Maintainer release steps, including signed-tag requirements, are documented in [How to cut a release](docs/how-to/cut-a-release.md).
+
 ## Security
 
 Lantern's own runtime is local-only, but agent CLIs may use their own external authentication and network behavior. Do not commit credentials, local databases, or machine-specific secrets. Report vulnerabilities privately through GitHub private vulnerability reporting when available; see [SECURITY.md](SECURITY.md).

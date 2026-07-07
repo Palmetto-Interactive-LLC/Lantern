@@ -1,6 +1,6 @@
 SHELL := /bin/bash
 
-.PHONY: help fmt lint test build docs-links verify audit shellcheck actionlint gitleaks security package-smoke install-smoke
+.PHONY: help fmt lint test build docs-links verify audit shellcheck actionlint gitleaks security package-smoke install-smoke release-signing-smoke
 
 help:
 	@printf 'Lantern quality commands:\n'
@@ -8,6 +8,7 @@ help:
 	@printf '  make security       cargo audit, shellcheck, actionlint, gitleaks\n'
 	@printf '  make package-smoke  Package the current host release tarball into a temp dir\n'
 	@printf '  make install-smoke  Run source installer under an isolated HOME\n'
+	@printf '  make release-signing-smoke  Verify local signed-tag release setup\n'
 
 fmt:
 	cargo fmt --check
@@ -30,7 +31,7 @@ audit:
 	cargo audit
 
 shellcheck:
-	shellcheck scripts/install.sh scripts/lantern-up.sh scripts/lantern-down.sh scripts/lantern-doctor.sh scripts/setup-iterm.sh scripts/startwork.sh scripts/stopwork.sh scripts/package-release.sh
+	shellcheck scripts/install.sh scripts/lantern-up.sh scripts/lantern-down.sh scripts/lantern-doctor.sh scripts/setup-iterm.sh scripts/startwork.sh scripts/stopwork.sh scripts/package-release.sh scripts/check-release-signing.sh
 
 actionlint:
 	actionlint -color=false .github/workflows/*.yml
@@ -63,3 +64,6 @@ install-smoke:
 	test -x "$$tmp_home/.lantern/bin/startwork"; \
 	test -x "$$tmp_home/.lantern/bin/stopwork"; \
 	test -f "$$tmp_home/Library/LaunchAgents/com.lantern.relay.plist"
+
+release-signing-smoke:
+	scripts/check-release-signing.sh

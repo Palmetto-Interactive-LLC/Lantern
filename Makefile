@@ -47,6 +47,8 @@ package-smoke: build
 	host="$$(rustc -vV | awk '/^host:/ {print $$2}')"; \
 	DIST_DIR="$$tmp_dist" scripts/package-release.sh v0.0.0-smoke "$$host"; \
 	test -f "$$tmp_dist/SHA256SUMS"; \
+	test -x "$$tmp_dist/install-lantern.sh"; \
+	grep -F "install-lantern.sh" "$$tmp_dist/SHA256SUMS" >/dev/null; \
 	tar -tzf "$$tmp_dist/lantern-v0.0.0-smoke-$$host.tar.gz" >/dev/null
 
 install-smoke:

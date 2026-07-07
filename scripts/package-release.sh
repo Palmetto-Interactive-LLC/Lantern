@@ -53,6 +53,10 @@ install_asset() {
   cp "$src" "$dest"
 }
 
+install_asset "${ROOT}/scripts/install.sh" "${DIST_DIR}/install-lantern.sh"
+chmod +x "${DIST_DIR}/install-lantern.sh"
+(cd "$DIST_DIR" && checksum install-lantern.sh) >> "${DIST_DIR}/SHA256SUMS"
+
 for target in "$@"; do
   binary="${ROOT}/target/${target}/release/lantern"
   if [[ ! -x "$binary" && "$target" == "$HOST_TARGET" ]]; then

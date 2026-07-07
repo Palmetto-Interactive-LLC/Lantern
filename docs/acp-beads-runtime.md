@@ -2,7 +2,7 @@
 
 **Status:** Draft — 2026-06-22  
 **Branch:** feat/acp-beads-runtime  
-**Scope:** Lantern (pi-code-orchestrator) substrate swap + headless agent runtime
+**Scope:** Lantern runtime substrate swap + headless agent runtime
 
 ---
 
@@ -143,7 +143,7 @@ transport change does not widen the failure surface — it narrows it (no shared
 ### Phase 0 — beads in repo (this PR target)
 
 - `bd` already installed (v1.0.5 Homebrew). Verify `bd ready --json` produces valid output.
-- Initialize a beads repo inside `pi-code-orchestrator` (`bd init` if not present).
+- Initialize Beads for the Lantern repository (`bd init` if not present).
 - Document schema conventions (tag namespace `lantern:`, metadata fields `lease_id`, `role`).
 - No Rust changes. Design doc only (this file).
 

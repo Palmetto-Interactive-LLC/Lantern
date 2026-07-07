@@ -1,97 +1,115 @@
 # Releasing Lantern
 
-## Versioning scheme
+Lantern uses Calendar Versioning: `YYYY.MM.PATCH`.
 
-Lantern uses **CalVer**: `YYYY.MM.PATCH`
+Examples: `2026.6.0`, `2026.6.1`, `2026.7.0`.
 
-| Component | Meaning |
-|-----------|---------|
-| `YYYY` | Four-digit year (e.g. `2026`) |
-| `MM` | Month without zero-padding (e.g. `6` for June, `12` for December) |
-| `PATCH` | Starts at `0`; increments for each additional release in the same month |
+## Release Requirements
 
-Examples: `2026.6.0`, `2026.6.1`, `2026.7.0`
+Before tagging:
 
-This is valid [semver](https://semver.org/) (`YYYY.MM.PATCH` maps to `major.minor.patch`). Tools like `cargo` and `gh` handle it without modification.
+```bash
+make verify
+make security
+make package-smoke
+make install-smoke
+```
 
-## Cutting a release
+`make package-smoke` proves the release tarball layout for the current host target. `make install-smoke` runs the source installer under an isolated `HOME` and verifies the installed binary, helper commands, iTerm scripts, and launchd plist.
 
-### 1. Bump the version
+## Version Bump
 
 Edit `Cargo.toml`:
 
 ```toml
 [package]
-version = "2026.7.0"   # ← new version
+version = "2026.7.0"
 ```
 
-Run `cargo build --release` locally to update `Cargo.lock`, then commit:
+Then verify and commit:
 
 ```bash
+make verify
 git add Cargo.toml Cargo.lock
 git commit -m "chore(release): bump version to 2026.7.0"
 git push
 ```
 
-### 2. Tag and push
+## Tag
 
 ```bash
 git tag v2026.7.0
 git push origin v2026.7.0
 ```
 
-Pushing the tag triggers `.github/workflows/release.yml`, which:
+Pushing a `v*` tag triggers `.github/workflows/release.yml`.
 
-1. Builds `lantern` for both `aarch64-apple-darwin` (Apple Silicon) and `x86_64-apple-darwin` (Intel)
-2. Packages each as `lantern-v2026.7.0-<target>.tar.gz`
-3. Generates `SHA256SUMS`
-4. Creates the GitHub Release with auto-generated notes and attaches all assets
+## Release Artifact Contract
 
-### 3. Verify the release
+Each macOS release tarball must contain:
+
+- `lantern`
+- `lantern-up`
+- `lantern-down`
+- `lantern-doctor`
+- `lantern-install`
+- `lantern-setup-iterm`
+- `startwork`
+- `stopwork`
+- `launchd.plist`
+- `iterm_*.py`
+
+The release workflow builds:
+
+- `lantern-vYYYY.M.PATCH-aarch64-apple-darwin.tar.gz`
+- `lantern-vYYYY.M.PATCH-x86_64-apple-darwin.tar.gz`
+- `SHA256SUMS`
+
+Packaging is centralized in `scripts/package-release.sh`; do not duplicate tarball layout logic in workflow YAML.
+
+## Verify Published Release
 
 ```bash
-gh release view v2026.7.0
+gh release view v2026.7.0 --json tagName,assets,isDraft,isPrerelease
+gh run list --workflow release.yml --limit 5
 ```
 
-Check that both `.tar.gz` assets and `SHA256SUMS` are attached and that the CI run passed.
+Confirm:
 
-### 4. Test the installer
+- release is not a draft unless intentionally staged
+- both target tarballs are attached
+- `SHA256SUMS` is attached
+- the release workflow completed successfully
+
+## Clean-Machine Installer Smoke
+
+Run on a macOS host after the release is published:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Palmetto-Interactive-LLC/Lantern/main/scripts/install.sh | sh
+tmp_home="$(mktemp -d)"
+HOME="$tmp_home" sh -c 'curl -fsSL https://raw.githubusercontent.com/Palmetto-Interactive-LLC/Lantern/main/scripts/install.sh | sh'
+"$tmp_home/.lantern/bin/lantern" --version
+ls -1 "$tmp_home/.lantern/bin" | sort
+test -f "$tmp_home/Library/LaunchAgents/com.lantern.relay.plist"
+rm -rf "$tmp_home"
 ```
 
----
+This verifies the public download path without overwriting the operator's real `~/.lantern`.
 
-## Workflow dispatch (manual trigger)
+## Manual Workflow Dispatch
 
-If the tag was pushed before the workflow was in place, or you need to re-run the release build:
+If the tag was pushed before the workflow was available, or a release build needs a re-run:
 
 ```bash
 gh workflow run release.yml --field tag=v2026.7.0
 ```
 
----
+## Patch Releases
 
-## Patch releases within a month
+For another release in the same month:
 
-If a critical fix ships later in June 2026:
-
-```
-version = "2026.6.1"   # in Cargo.toml
-git tag v2026.6.1
-git push origin v2026.6.1
+```toml
+version = "2026.7.1"
 ```
 
----
-
-## CI gates (must be green before tagging)
-
-```bash
-cargo fmt --check
-cargo clippy --all-targets
-cargo build --release
-cargo test
-```
-
-All four are enforced by `.github/workflows/ci.yml` on every push to `main` and every PR.
+Then repeat the release requirements, commit, tag, and verify steps.

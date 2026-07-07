@@ -468,7 +468,7 @@ async fn launch_solo_goose(
 
     // One worktree for the solo session.
     let worktree = create_orchestrator_worktree(repo, worktree_root, session_id).await?;
-    sync_skills_parallel(&[worktree.clone()]).await;
+    sync_skills_parallel(std::slice::from_ref(&worktree)).await;
 
     // Full-featured native goose: claude-acp/opus, terminal env left intact so
     // iTerm2 features work, keyring on, no devorch extension.
@@ -2037,10 +2037,18 @@ fn kill_toad_processes() {
     }
 }
 
-/// Start Temporal and Relay if the installer left `lantern-up.sh` in place.
+/// Start Temporal and Relay if the installer left a service helper in place.
 fn ensure_squad_services() {
-    let script = dirs::home_dir().map(|h| h.join(".lantern").join("bin").join("lantern-up.sh"));
-    let Some(script) = script.filter(|p| p.exists()) else {
+    let script = dirs::home_dir().and_then(|h| {
+        let bin = h.join(".lantern").join("bin");
+        let current = bin.join("lantern-up");
+        if current.exists() {
+            return Some(current);
+        }
+        let legacy = bin.join("lantern-up.sh");
+        legacy.exists().then_some(legacy)
+    });
+    let Some(script) = script else {
         return;
     };
     let _ = std::process::Command::new("bash")

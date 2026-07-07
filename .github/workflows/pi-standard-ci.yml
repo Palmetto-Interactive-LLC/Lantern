@@ -24,52 +24,30 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Detect Node project
-        id: node
+      - name: Install protobuf compiler
         shell: bash
         run: |
-          if [ -f package.json ]; then
-            echo "present=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "present=false" >> "$GITHUB_OUTPUT"
-          fi
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y protobuf-compiler
 
-      - name: Setup Node
-        if: steps.node.outputs.present == 'true'
-        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@67ef31d5b988238dd797d409d6f9574278e20537 # master
         with:
-          node-version: 24
+          toolchain: stable
+          components: rustfmt,clippy
 
-      - name: Install dependencies
-        if: steps.node.outputs.present == 'true'
+      - name: Rust fmt
         shell: bash
-        run: |
-          set -euo pipefail
-          if [ -f package-lock.json ]; then
-            npm ci
-          elif [ -f pnpm-lock.yaml ]; then
-            corepack enable
-            pnpm install --frozen-lockfile
-          elif [ -f yarn.lock ]; then
-            corepack enable
-            yarn install --immutable
-          else
-            npm install
-          fi
+        run: cargo fmt --check
 
-      - name: lint
+      - name: Rust clippy
         shell: bash
-        run: |
-          set -euo pipefail
-          if [ ! -f package.json ]; then
-            echo "No package.json found; skipping lint."
-            exit 0
-          fi
-          if node -e "process.exit(require('./package.json').scripts?.lint ? 0 : 1)"; then
-            npm run lint
-          else
-            echo "No lint script configured; skipping lint."
-          fi
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: Documentation links
+        shell: bash
+        run: python3 scripts/check-doc-links.py
 
   build-test:
     name: build-test
@@ -82,54 +60,22 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Detect Node project
-        id: node
+      - name: Install protobuf compiler
         shell: bash
         run: |
-          if [ -f package.json ]; then
-            echo "present=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "present=false" >> "$GITHUB_OUTPUT"
-          fi
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y protobuf-compiler
 
-      - name: Setup Node
-        if: steps.node.outputs.present == 'true'
-        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@67ef31d5b988238dd797d409d6f9574278e20537 # master
         with:
-          node-version: 24
+          toolchain: stable
 
-      - name: Install dependencies
-        if: steps.node.outputs.present == 'true'
+      - name: Build release binary
         shell: bash
-        run: |
-          set -euo pipefail
-          if [ -f package-lock.json ]; then
-            npm ci
-          elif [ -f pnpm-lock.yaml ]; then
-            corepack enable
-            pnpm install --frozen-lockfile
-          elif [ -f yarn.lock ]; then
-            corepack enable
-            yarn install --immutable
-          else
-            npm install
-          fi
+        run: cargo build --release
 
-      - name: build-test
+      - name: Test
         shell: bash
-        run: |
-          set -euo pipefail
-          if [ ! -f package.json ]; then
-            echo "No package.json found; skipping build/test."
-            exit 0
-          fi
-          if node -e "process.exit(require('./package.json').scripts?.test ? 0 : 1)"; then
-            npm test
-          else
-            echo "No test script configured; skipping tests."
-          fi
-          if node -e "process.exit(require('./package.json').scripts?.build ? 0 : 1)"; then
-            npm run build
-          else
-            echo "No build script configured; skipping build."
-          fi
+        run: cargo test

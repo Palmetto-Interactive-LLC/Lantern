@@ -8,7 +8,6 @@ Filesystem layout, environment variables, and external tool locations.
 ~/.lantern/
 ├── bin/
 │   ├── lantern
-│   ├── temporal
 │   ├── lantern-up
 │   ├── lantern-down
 │   ├── lantern-doctor
@@ -24,7 +23,8 @@ Filesystem layout, environment variables, and external tool locations.
 ├── logs/
 │   ├── relay.log
 │   ├── relay.error.log
-│   └── temporal.log
+│   ├── temporal.log
+│   └── temporal.error.log
 └── run/
     ├── relay.pid
     ├── temporal.pid
@@ -33,14 +33,15 @@ Filesystem layout, environment variables, and external tool locations.
 
 ## macOS launchd
 
-Plist: `~/Library/LaunchAgents/com.lantern.relay.plist`
+Relay has a persistent plist at `~/Library/LaunchAgents/com.lantern.relay.plist`.
+Temporal is submitted as an ephemeral launchd job when `lantern up` runs.
 
 | Key | Value |
 |-----|-------|
-| Label | `com.lantern.relay` |
-| Program | `~/.lantern/bin/lantern relay --machine <hostname>` |
-| KeepAlive | true |
-| RunAtLoad | true |
+| Temporal label | `com.lantern.temporal` |
+| Temporal program | `temporal server start-dev --db-filename ~/.lantern/data/temporal/temporal.db --ip 127.0.0.1 --port 8243 --ui-port 8244` |
+| Relay label | `com.lantern.relay` |
+| Relay program | `~/.lantern/bin/lantern relay --machine <hostname>` |
 
 ## Worktree Layout (per repo)
 
@@ -94,7 +95,7 @@ Runtime MCP configuration belongs in the agent CLI settings and should point to 
 | `codex` | PATH | Agent CLI |
 | `kimi` | PATH | Agent CLI |
 | `git` | PATH | Worktree management |
-| `temporal` | `~/.lantern/bin/temporal` | Temporal CLI |
+| `temporal` | PATH, commonly Homebrew (`brew install temporal`) | Temporal CLI |
 
 ## Temporary Files
 

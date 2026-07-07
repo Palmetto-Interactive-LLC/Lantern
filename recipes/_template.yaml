@@ -1,4 +1,4 @@
-# Goose Recipe Template — pi-code-orchestrator worker roles
+# Goose Recipe Template — Lantern worker roles
 #
 # Run a recipe:
 #   GOOSE_DISABLE_KEYRING=1 goose run --recipe recipes/<name>.yaml \

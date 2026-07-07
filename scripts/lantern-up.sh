@@ -5,9 +5,22 @@ LANTERN_HOME="${HOME}/.lantern"
 LANTERN_DATA="${LANTERN_HOME}/data"
 LANTERN_LOGS="${LANTERN_HOME}/logs"
 LANTERN_RUN="${LANTERN_HOME}/run"
+TEMPORAL_LABEL="com.lantern.temporal"
+
+mkdir -p "$LANTERN_DATA/temporal" "$LANTERN_LOGS" "$LANTERN_RUN"
 
 log() {
     echo "[$(date '+%Y-%m-%dT%H:%M:%S%z')] $*"
+}
+
+OS=$(uname -s)
+
+temporal_launchd_pid() {
+    if [[ "$OS" != "Darwin" ]]; then
+        return 0
+    fi
+    launchctl list "$TEMPORAL_LABEL" 2>/dev/null \
+        | awk -F'= ' '/"PID"/ {gsub(/[;"]/, "", $2); print $2; exit}'
 }
 
 # ------------------------------------------------------------------
@@ -27,11 +40,14 @@ check_temporal_conflicts() {
 
     # 2. Check if another process is listening on 8243 (any interface, including IPv6)
     if command -v lsof >/dev/null 2>&1; then
-        LSOF_CONFLICT=$(lsof -nP -iTCP:8243 -sTCP:LISTEN || true)
+        LSOF_CONFLICT=$(lsof -nP -iTCP:8243 -sTCP:LISTEN 2>/dev/null || true)
         if [[ -n "$LSOF_CONFLICT" ]]; then
             NATIVE_PID=""
             if [[ -f "$LANTERN_RUN/temporal.pid" ]]; then
                 NATIVE_PID=$(cat "$LANTERN_RUN/temporal.pid")
+            fi
+            if [[ -z "$NATIVE_PID" ]]; then
+                NATIVE_PID=$(temporal_launchd_pid)
             fi
             
             LISTENING_PIDS=$(echo "$LSOF_CONFLICT" | awk 'NR>1 {print $2}' | sort -u)
@@ -81,16 +97,42 @@ if [[ "$temporal_needs_restart" == "false" ]] && temporal_is_serving 2>/dev/null
     log "INFO: Temporal already running and healthy on 127.0.0.1:8243"
 else
     log "INFO: Starting native Temporal dev server..."
-    # Explicitly bind native server to 127.0.0.1:8243 and UI to 8244 to prevent loopback/Docker conflicts
-    temporal server start-dev \
-        --db-filename "$LANTERN_DATA/temporal/temporal.db" \
-        --ui-port 8244 \
-        --ip 127.0.0.1 \
-        --port 8243 \
-        > "$LANTERN_LOGS/temporal.log" 2>&1 &
-    TEMPORAL_PID=$!
-    echo "$TEMPORAL_PID" > "$LANTERN_RUN/temporal.pid"
-    log "INFO: Temporal started (PID $TEMPORAL_PID)"
+    if [[ "$OS" == "Darwin" ]]; then
+        TEMPORAL_BIN=$(command -v temporal || true)
+        if [[ -z "$TEMPORAL_BIN" ]]; then
+            log "ERROR: Temporal CLI not found. Install it with: brew install temporal"
+            exit 1
+        fi
+        launchctl remove "$TEMPORAL_LABEL" 2>/dev/null || true
+        launchctl submit \
+            -l "$TEMPORAL_LABEL" \
+            -o "$LANTERN_LOGS/temporal.log" \
+            -e "$LANTERN_LOGS/temporal.error.log" \
+            -- "$TEMPORAL_BIN" server start-dev \
+            --db-filename "$LANTERN_DATA/temporal/temporal.db" \
+            --ui-port 8244 \
+            --ip 127.0.0.1 \
+            --port 8243
+        TEMPORAL_PID=$(temporal_launchd_pid)
+        if [[ -n "$TEMPORAL_PID" ]]; then
+            echo "$TEMPORAL_PID" > "$LANTERN_RUN/temporal.pid"
+            log "INFO: Temporal submitted to launchd (PID $TEMPORAL_PID)"
+        else
+            rm -f "$LANTERN_RUN/temporal.pid"
+            log "INFO: Temporal submitted to launchd"
+        fi
+    else
+        # Explicitly bind native server to 127.0.0.1:8243 and UI to 8244 to prevent loopback/Docker conflicts.
+        nohup temporal server start-dev \
+            --db-filename "$LANTERN_DATA/temporal/temporal.db" \
+            --ui-port 8244 \
+            --ip 127.0.0.1 \
+            --port 8243 \
+            > "$LANTERN_LOGS/temporal.log" 2>&1 < /dev/null &
+        TEMPORAL_PID=$!
+        echo "$TEMPORAL_PID" > "$LANTERN_RUN/temporal.pid"
+        log "INFO: Temporal started (PID $TEMPORAL_PID)"
+    fi
 
     # Active health check: wait for server to become SERVING
     log "INFO: Waiting for Temporal to become SERVING (timeout: ${TEMPORAL_HEALTH_CHECK_TIMEOUT}s)..."
@@ -121,10 +163,15 @@ for sa in repo_id repo_root session run_id role transport_status message_status 
         --name "$sa" --type Keyword >/dev/null 2>&1 || true
 done
 
+if ! temporal_is_serving 2>/dev/null; then
+    log "ERROR: Temporal stopped after startup checks"
+    log "ERROR: Check $LANTERN_LOGS/temporal.log for details"
+    exit 1
+fi
+
 # ------------------------------------------------------------------
 # Lantern Relay
 # ------------------------------------------------------------------
-OS=$(uname -s)
 if [[ "$OS" == "Darwin" ]]; then
     PLIST="$HOME/Library/LaunchAgents/com.lantern.relay.plist"
     if launchctl list com.lantern.relay >/dev/null 2>&1; then
@@ -157,7 +204,17 @@ if [[ -f "$LANTERN_RUN/temporal.pid" ]]; then
 fi
 
 if [[ "$OS" == "Darwin" ]]; then
-    log "INFO: Relay:    $(launchctl list com.lantern.relay 2>/dev/null | tail -n1 || echo 'not loaded')"
+    if launchctl list com.lantern.relay >/dev/null 2>&1; then
+        RELAY_PID=$(launchctl list com.lantern.relay 2>/dev/null \
+            | awk -F'= ' '/"PID"/ {gsub(/[;"]/, "", $2); print $2; exit}')
+        if [[ -n "$RELAY_PID" ]]; then
+            log "INFO: Relay:    launchd PID $RELAY_PID"
+        else
+            log "INFO: Relay:    launchd loaded"
+        fi
+    else
+        log "INFO: Relay:    not loaded"
+    fi
 else
     if [[ -f "$LANTERN_RUN/relay.pid" ]]; then
         log "INFO: Relay:    PID $(cat "$LANTERN_RUN/relay.pid")"

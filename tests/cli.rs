@@ -21,6 +21,22 @@ fn lantern_command(home: &TempDir) -> Command {
     command
 }
 
+fn write_helper(home: &TempDir, name: &str) {
+    let bin = home.path().join(".lantern").join("bin");
+    std::fs::create_dir_all(&bin).expect("create helper bin dir");
+    let path = bin.join(name);
+    std::fs::write(&path, "#!/bin/sh\nexit 0\n").expect("write helper script");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut permissions = std::fs::metadata(&path)
+            .expect("helper metadata")
+            .permissions();
+        permissions.set_mode(0o755);
+        std::fs::set_permissions(&path, permissions).expect("mark helper executable");
+    }
+}
+
 #[test]
 fn test_cli_help() {
     let output = Command::new(lantern_bin())
@@ -71,6 +87,29 @@ fn test_status_command() {
         stdout.contains("Lantern Relay Status") || stdout.contains("Machine:"),
         "status should print formatted status table"
     );
+}
+
+#[test]
+fn test_installed_helper_commands_are_resolved_without_sh_suffix() {
+    for (command, helper) in [
+        ("install", "lantern-install"),
+        ("up", "lantern-up"),
+        ("down", "lantern-down"),
+        ("doctor", "lantern-doctor"),
+    ] {
+        let home = isolated_home();
+        write_helper(&home, helper);
+        let output = lantern_command(&home)
+            .arg(command)
+            .output()
+            .unwrap_or_else(|e| panic!("failed to execute lantern {command}: {e}"));
+
+        assert!(
+            output.status.success(),
+            "lantern {command} failed to run helper {helper}\nstderr: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
 }
 
 #[test]

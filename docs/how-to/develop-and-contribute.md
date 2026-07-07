@@ -5,8 +5,8 @@ Build, test, and extend Lantern Relay.
 ## Set Up the Repository
 
 ```bash
-git clone https://github.com/Palmetto-Interactive-LLC/pi-code-orchestrator.git
-cd pi-code-orchestrator
+git clone https://github.com/Palmetto-Interactive-LLC/Lantern.git
+cd Lantern
 cargo build
 ```
 
@@ -20,10 +20,18 @@ cargo run -- relay --machine dev
 ## Run Tests
 
 ```bash
+make verify
+```
+
+The equivalent individual commands are:
+
+```bash
 cargo test
 cargo test --test cli
-cargo clippy
+cargo clippy --all-targets -- -D warnings
 cargo fmt --check
+cargo build --release
+python3 scripts/check-doc-links.py
 ```
 
 ## Install a Local Build
@@ -89,12 +97,11 @@ src/
 ├── mcp/              JSON-RPC compatibility; runtime tools disabled
 ├── human/            Human command entrypoints
 └── recovery/         Recovery entrypoints
-packages/
-├── devorch-contracts/   Runtime contracts
-└── devorch-workflows/   Temporal workflow definitions
 migrations/             SQLite schema and quarantine migrations
 scripts/                Install and service scripts
 tests/                  Integration tests
+recipes/                Agent role recipe templates
+.github/workflows/      CI, security, CodeQL, and release workflows
 ```
 
 ## Add a New CLI Command

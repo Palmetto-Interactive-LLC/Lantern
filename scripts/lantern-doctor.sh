@@ -3,6 +3,7 @@ set -euo pipefail
 
 LANTERN_HOME="${HOME}/.lantern"
 LANTERN_RUN="${LANTERN_HOME}/run"
+TEMPORAL_LABEL="com.lantern.temporal"
 
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
@@ -27,6 +28,14 @@ status_err() {
 
 OS=$(uname -s)
 
+temporal_launchd_pid() {
+    if [[ "$OS" != "Darwin" ]]; then
+        return 0
+    fi
+    launchctl list "$TEMPORAL_LABEL" 2>/dev/null \
+        | awk -F'= ' '/"PID"/ {gsub(/[;"]/, "", $2); print $2; exit}'
+}
+
 log "INFO: Running Lantern health checks..."
 
 # ------------------------------------------------------------------
@@ -46,11 +55,14 @@ fi
 
 # 2. Port listening checks specifically for our isolated port 8243
 if command -v lsof >/dev/null 2>&1; then
-    LSOF_OUT=$(lsof -nP -iTCP:8243 -sTCP:LISTEN || true)
+    LSOF_OUT=$(lsof -nP -iTCP:8243 -sTCP:LISTEN 2>/dev/null || true)
     if [[ -n "$LSOF_OUT" ]]; then
         NATIVE_PID=""
         if [[ -f "$LANTERN_RUN/temporal.pid" ]]; then
             NATIVE_PID=$(cat "$LANTERN_RUN/temporal.pid")
+        fi
+        if [[ -z "$NATIVE_PID" ]]; then
+            NATIVE_PID=$(temporal_launchd_pid)
         fi
 
         LISTENING_PIDS=$(echo "$LSOF_OUT" | awk 'NR>1 {print $2}' | sort -u)

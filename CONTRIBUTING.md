@@ -7,15 +7,15 @@ We welcome contributions to Lantern. Please read this guide to understand our de
 ### Prerequisites
 
 - macOS with iTerm2
-- Rust 1.70+ (install via [rustup](https://rustup.rs/))
-- Temporal CLI (`brew install temporal-cli`)
+- Rust stable (install via [rustup](https://rustup.rs/))
+- Temporal CLI (`brew install temporal`)
 - git
 
 ### Building from Source
 
 ```bash
-git clone https://github.com/Palmetto-Interactive-LLC/pi-code-orchestrator.git
-cd pi-code-orchestrator
+git clone https://github.com/Palmetto-Interactive-LLC/Lantern.git
+cd Lantern
 cargo build --release
 ```
 
@@ -35,6 +35,15 @@ lantern restart
 
 All code must pass the following gates before merging to `main`:
 
+### One-Command Verification
+
+```bash
+make verify
+make security
+```
+
+`make verify` is the normal local gate for contributors. `make security` requires `cargo-audit`, `shellcheck`, `actionlint`, and `gitleaks`; run it when changing workflows, scripts, dependencies, release packaging, or security-sensitive paths.
+
 ### Code Formatting
 
 ```bash
@@ -50,7 +59,7 @@ cargo fmt
 ### Linting
 
 ```bash
-cargo clippy
+cargo clippy --all-targets -- -D warnings
 ```
 
 Fix any clippy warnings before submitting a PR.
@@ -61,11 +70,11 @@ Fix any clippy warnings before submitting a PR.
 cargo test
 ```
 
-All tests must pass. Note: Tests run against SQLite and may require the local Temporal dev server. Ensure `lantern up` has been run to initialize services.
+All tests must pass. The default test suite uses isolated temporary SQLite databases and does not require a running Temporal server.
 
 ### CI Pipeline
 
-GitHub Actions runs `cargo fmt --check` on every push and PR to `main`. All formatting must pass before merge. Note: `cargo test` and `cargo clippy` are not currently run in CI but are required for local validation.
+GitHub Actions runs Rust formatting, strict clippy, Markdown relative-link checks, release build, tests, security scans, action linting, and CodeQL on pushes and PRs to `main`. The branch ruleset requires the `lint`, `build-test`, `secrets-scan`, `sast`, `deps-scan`, `iac-scan`, and `actions-lint` contexts before merge.
 
 ## Branch and PR Workflow
 
@@ -107,9 +116,9 @@ Fixes #42
 
 1. **Create PR to `main` only** — feature branches must merge to `main`, not to another branch
 2. **Linear history required** — rebase your branch before merging (no merge commits)
-3. **Code owners review** — PRs require approval from CODEOWNERS before merge
-4. **All tests pass** — local `cargo test`, `cargo fmt --check`, and `cargo clippy` must succeed
-5. **CI passes** — GitHub Actions must pass `cargo fmt --check`
+3. **Review threads resolved** — maintainers may review, but CODEOWNERS approval is not required by the current ruleset
+4. **All tests pass** — local `cargo test`, `cargo fmt --check`, and `cargo clippy --all-targets -- -D warnings` must succeed
+5. **CI passes** — required GitHub Actions contexts must pass before merge
 
 ### Merging
 
@@ -120,7 +129,7 @@ git pull --rebase origin main
 git push origin your-branch
 ```
 
-Use GitHub's "Rebase and merge" option to maintain linear history.
+Use GitHub's configured squash merge path. The ruleset enforces signed commits and linear history.
 
 ## Issue Tracking with Beads
 
@@ -175,7 +184,9 @@ Address review feedback by pushing new commits to your branch. Do not force-push
 
 ## Questions?
 
-- Check [existing issues](https://github.com/Palmetto-Interactive-LLC/pi-code-orchestrator/issues)
+- Check [existing issues](https://github.com/Palmetto-Interactive-LLC/Lantern/issues)
+- Read [SUPPORT.md](SUPPORT.md) for support scope and issue-reporting details
+- Read [ROADMAP.md](ROADMAP.md) for current stable and experimental surfaces
 - Read [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) for community standards
 - Review [CLAUDE.md](CLAUDE.md) for project context and architecture
 

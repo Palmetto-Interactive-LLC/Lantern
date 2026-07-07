@@ -22,8 +22,8 @@ If you are unsure whether prerequisites are met, run the installer. It checks mo
 Clone the repository and run the installer:
 
 ```bash
-git clone https://github.com/Palmetto-Interactive-LLC/pi-code-orchestrator.git
-cd pi-code-orchestrator
+git clone https://github.com/Palmetto-Interactive-LLC/Lantern.git
+cd Lantern
 ./scripts/install.sh
 ```
 

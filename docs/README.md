@@ -24,6 +24,8 @@ This documentation is organized by **what you need**, not by source file. It fol
 | Pause, take over, or recover an agent | [How to intervene with agents](how-to/intervene-with-agents.md) |
 | Fix something that broke | [How to troubleshoot issues](how-to/troubleshoot-issues.md) |
 | Build or contribute to Lantern | [How to develop and contribute](how-to/develop-and-contribute.md) |
+| Understand support boundaries | [Support](../SUPPORT.md) |
+| See what is stable vs experimental | [Roadmap](../ROADMAP.md) |
 | Plan diagnostics and health output | [Doctor-state planning](reference/doctor-state.md) |
 | Verify the Temporal runtime migration | [Resilience verification report](reference/resilience-verification-report.md) |
 | Look up a command or config field | [Reference](#reference) |

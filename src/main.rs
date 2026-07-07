@@ -3,8 +3,6 @@ mod config;
 mod db;
 mod delivery;
 mod doctor_state;
-mod events;
-mod git;
 mod human;
 mod mcp;
 mod recovery;
@@ -13,7 +11,6 @@ mod stopwork;
 mod supervisor;
 mod temporal;
 mod terminal;
-mod transcript;
 mod types;
 
 use clap::{Parser, Subcommand};
@@ -83,7 +80,6 @@ enum Commands {
     /// Positional args match legacy startwork: `[name] [number] [agent]`
     /// e.g. `startwork kimi` or `startwork m7-navi 40 claude`
     Startwork {
-        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         positionals: Vec<String>,
         /// Agent CLI family (overrides trailing agent arg)
         #[arg(long)]
@@ -620,6 +616,58 @@ mod tests {
                 fix: Some(DoctorStateFix::Quarantine),
             } => {}
             _ => panic!("expected doctor-state fix command"),
+        }
+    }
+
+    #[test]
+    fn startwork_accepts_options_after_positionals() {
+        let cli = Cli::try_parse_from([
+            "lantern",
+            "startwork",
+            "lantern-smoke",
+            "97",
+            "--agent",
+            "goose",
+            "--no-init",
+        ])
+        .expect("parse startwork command");
+
+        match cli.command {
+            Commands::Startwork {
+                positionals,
+                agent: Some(agent),
+                no_init: true,
+            } => {
+                assert_eq!(positionals, ["lantern-smoke", "97"]);
+                assert_eq!(agent, "goose");
+            }
+            _ => panic!("expected startwork command with parsed options"),
+        }
+    }
+
+    #[test]
+    fn startwork_accepts_options_before_positionals() {
+        let cli = Cli::try_parse_from([
+            "lantern",
+            "startwork",
+            "--agent",
+            "goose",
+            "--no-init",
+            "lantern-smoke",
+            "97",
+        ])
+        .expect("parse startwork command");
+
+        match cli.command {
+            Commands::Startwork {
+                positionals,
+                agent: Some(agent),
+                no_init: true,
+            } => {
+                assert_eq!(positionals, ["lantern-smoke", "97"]);
+                assert_eq!(agent, "goose");
+            }
+            _ => panic!("expected startwork command with parsed options"),
         }
     }
 }

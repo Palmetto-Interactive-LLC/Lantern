@@ -1,5 +1,4 @@
 use std::collections::HashSet;
-use std::process::Command;
 
 use chrono::{Duration, Utc};
 use clap::ValueEnum;
@@ -9,6 +8,11 @@ use tracing::{info, warn};
 use crate::config::Config;
 use crate::db::queries;
 use crate::types::TerminalTarget;
+
+#[cfg(unix)]
+extern "C" {
+    fn kill(pid: i32, sig: i32) -> i32;
+}
 
 #[derive(Clone, Debug, PartialEq, Eq, ValueEnum)]
 pub enum DoctorStateFix {
@@ -227,12 +231,16 @@ fn is_runner_pid_dead(target: &TerminalTarget) -> bool {
 fn process_is_alive(pid: i32) -> bool {
     #[cfg(unix)]
     {
-        Command::new("kill")
-            .arg("-0")
-            .arg(pid.to_string())
-            .status()
-            .map(|s| s.success())
-            .unwrap_or(false)
+        if pid <= 0 {
+            return false;
+        }
+
+        if unsafe { kill(pid, 0) } == 0 {
+            return true;
+        }
+
+        // EPERM means the process exists, but the current user cannot signal it.
+        std::io::Error::last_os_error().raw_os_error() == Some(1)
     }
 
     #[cfg(not(unix))]

@@ -1,81 +1,95 @@
 # Lantern
 
+[![CI](https://github.com/Palmetto-Interactive-LLC/Lantern/actions/workflows/ci.yml/badge.svg)](https://github.com/Palmetto-Interactive-LLC/Lantern/actions/workflows/ci.yml)
+[![Security](https://github.com/Palmetto-Interactive-LLC/Lantern/actions/workflows/pi-standard-security.yml/badge.svg)](https://github.com/Palmetto-Interactive-LLC/Lantern/actions/workflows/pi-standard-security.yml)
+[![Releases](https://img.shields.io/github/v/release/Palmetto-Interactive-LLC/Lantern)](https://github.com/Palmetto-Interactive-LLC/Lantern/releases)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
-[![Releases](https://img.shields.io/github/v/release/Palmetto-Interactive-LLC/pi-code-orchestrator)](https://github.com/Palmetto-Interactive-LLC/pi-code-orchestrator/releases)
-[![Issues](https://img.shields.io/github/issues/Palmetto-Interactive-LLC/pi-code-orchestrator)](https://github.com/Palmetto-Interactive-LLC/pi-code-orchestrator/issues)
 
-**Lantern** is a self-contained Rust binary that orchestrates AI coding squads on your local machine—managing multiple agent processes, terminal windows, git worktrees, and workflow state with zero cloud dependencies.
+Lantern is a macOS-first Rust runtime for local AI coding squads. It launches agent workspaces, manages iTerm2 panes and git worktrees, records local SQLite audit state, and exposes MCP-compatible orchestration tools for agent status, messaging, and recovery.
 
-## Why Lantern?
+Lantern is for developers and operators who want repeatable local multi-agent development without adding a hosted control plane to their repository. It is intentionally local-first: Lantern does not require cloud credentials, and its own state stays under `~/.lantern/`.
 
-Multi-agent development needs coordination across specialized roles (code review, data design, security, UI, ops). Lantern consolidates this into one lightweight service: one command launches your entire squad, each agent gets an isolated terminal pane and git branch, and agents communicate via MCP tools.
+## Project Status
 
-## Quick Start
+Lantern is usable for Palmetto-style local agent squads and is still evolving as an OSS project. The stable surface is the CLI, installer, local state model, and documented iTerm2 workflow. The ACP/Goose and Beads runtime re-platforming work is experimental and tracked in Beads.
 
-### Install
+See [ROADMAP.md](ROADMAP.md) for the stable/experimental boundary and near-term priorities.
+
+## Prerequisites
+
+- macOS with iTerm2 for full squad launching
+- Rust stable toolchain
+- git
+- Temporal CLI for local workflow diagnostics (`brew install temporal`)
+- At least one supported agent CLI on PATH: `claude`, `codex`, `agy`, or `kimi`
+
+## Five-Minute Smoke Test
+
+This path verifies the source checkout without installing a launchd service or starting a real squad:
 
 ```bash
-# Clone and build (requires Rust 1.70+, git, Temporal CLI)
-git clone https://github.com/Palmetto-Interactive-LLC/pi-code-orchestrator.git
-cd pi-code-orchestrator
+git clone https://github.com/Palmetto-Interactive-LLC/Lantern.git
+cd Lantern
+cargo fmt --check
+cargo test --test cli
+cargo build --release
+target/release/lantern --help
+```
+
+Expected result: the commands pass and `lantern --help` lists commands such as `relay`, `status`, `startwork`, `stopwork`, and `mcp`.
+
+## Install Locally
+
+From a source checkout:
+
+```bash
 ./scripts/install.sh
 source ~/.zshrc
+lantern --version
+lantern doctor
 ```
 
-### Launch a Squad
+The installer builds Lantern when run from the repository. When piped from GitHub, it downloads the latest release asset and verifies `SHA256SUMS` when available.
+
+## Launch A Squad
 
 ```bash
-# Default: headed orchestrator + 8 headless specialists (claude agent)
 lantern up
-lantern startwork myproject
-
-# Solo Goose mode (single focused agent, no orchestrator overhead)
-lantern startwork myproject --agent goose
-
-# Different agent CLI
-lantern startwork myproject --agent codex
+lantern startwork myproject 99 --agent claude --no-init
+lantern status
+lantern stopwork myproject-99
 ```
 
-### Common Commands
+Use a disposable repository and high slot number for first tests. Full launch requires iTerm2's Python API and the selected agent CLI to be configured locally.
+
+## Documentation
+
+| Need | Start here |
+| --- | --- |
+| Guided first run | [Tutorial: Your first squad](docs/tutorial/first-squad.md) |
+| Installation details | [How to install Lantern](docs/how-to/install-lantern.md) |
+| Daily service commands | [How to manage services](docs/how-to/manage-services.md) |
+| CLI reference | [Command reference](docs/reference/cli.md) |
+| Configuration | [Configuration reference](docs/reference/configuration.md) |
+| Architecture | [Architecture overview](docs/explanation/architecture.md) |
+| Troubleshooting | [Troubleshooting guide](docs/how-to/troubleshoot-issues.md) |
+| Contributing | [CONTRIBUTING.md](CONTRIBUTING.md) |
+
+## Development Gates
 
 ```bash
-lantern doctor        # Health check (Rust, Temporal, iTerm2, git, agents)
-lantern status        # Show all active squads
-lantern stopwork myproject-1  # Tear down a squad
+make verify
+make security
 ```
 
-The binary is produced at `target/release/lantern`.
+`make verify` runs Rust formatting, strict clippy, tests, release build, and local Markdown link checks. `make security` runs cargo audit, shellcheck, actionlint, and gitleaks. GitHub branch protection requires the `lint`, `build-test`, and security workflow contexts to pass before changes merge to `main`.
 
-### Test
-
-- **MCP Server**: Agents report status, send peer messages, query team state via `devorch_*` tools
-- **Local Runner**: Creates iTerm2 window with colored panes (one per role), git worktrees for isolation
-- **State Store**: SQLite at `~/.lantern/data/relay/lantern.db` (local, no cloud)
-- **Optional Temporal**: Dev server at `127.0.0.1:8243` for workflow logging (Docker Temporal unsupported)
-
-## Learn More
-
-| Topic | Link |
-|-------|------|
-| **Agent Modes** | [Wiki: Agent Modes](https://github.com/Palmetto-Interactive-LLC/pi-code-orchestrator/wiki/Agent-Modes) |
-| **Full Command Reference** | [Wiki: Commands](https://github.com/Palmetto-Interactive-LLC/pi-code-orchestrator/wiki/Command-Reference) |
-| **Architecture** | [Wiki: Architecture](https://github.com/Palmetto-Interactive-LLC/pi-code-orchestrator/wiki/Architecture) |
-| **Installation** | [Wiki: Installation & Setup](https://github.com/Palmetto-Interactive-LLC/pi-code-orchestrator/wiki/Installation-&-Setup) |
-| **MCP Tools** | [Wiki: MCP Tools](https://github.com/Palmetto-Interactive-LLC/pi-code-orchestrator/wiki/MCP-Tools) |
-| **Troubleshooting** | [Wiki: Troubleshooting](https://github.com/Palmetto-Interactive-LLC/pi-code-orchestrator/wiki/Troubleshooting) |
-
-## Contributing
-
-See [CONTRIBUTING.md](CONTRIBUTING.md) for development workflow, build gates, and issue tracking with Beads.
+For support expectations and issue-reporting details, see [SUPPORT.md](SUPPORT.md).
 
 ## Security
 
-Local-only design: no cloud connectivity, no credentials, no secrets. See [SECURITY.md](SECURITY.md).
+Lantern's own runtime is local-only, but agent CLIs may use their own external authentication and network behavior. Do not commit credentials, local databases, or machine-specific secrets. Report vulnerabilities privately through GitHub private vulnerability reporting when available; see [SECURITY.md](SECURITY.md).
 
 ## License
 
-Apache License 2.0 — see [LICENSE](LICENSE).
-
----
-
-**Questions?** [Open an issue](https://github.com/Palmetto-Interactive-LLC/pi-code-orchestrator/issues) or check the [Wiki](https://github.com/Palmetto-Interactive-LLC/pi-code-orchestrator/wiki).
+Lantern is licensed under the Apache License 2.0. See [LICENSE](LICENSE).

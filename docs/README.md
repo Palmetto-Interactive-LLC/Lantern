@@ -24,6 +24,7 @@ This documentation is organized by **what you need**, not by source file. It fol
 | Pause, take over, or recover an agent | [How to intervene with agents](how-to/intervene-with-agents.md) |
 | Fix something that broke | [How to troubleshoot issues](how-to/troubleshoot-issues.md) |
 | Build or contribute to Lantern | [How to develop and contribute](how-to/develop-and-contribute.md) |
+| Cut a maintainer release | [How to cut a release](how-to/cut-a-release.md) |
 | Understand support boundaries | [Support](../SUPPORT.md) |
 | See what is stable vs experimental | [Roadmap](../ROADMAP.md) |
 | Plan diagnostics and health output | [Doctor-state planning](reference/doctor-state.md) |
@@ -50,6 +51,7 @@ Task-oriented. Assumes you know what you want to accomplish.
 - [Intervene with agents](how-to/intervene-with-agents.md)
 - [Troubleshoot issues](how-to/troubleshoot-issues.md)
 - [Develop and contribute](how-to/develop-and-contribute.md)
+- [Cut a release](how-to/cut-a-release.md)
 
 ### Reference
 

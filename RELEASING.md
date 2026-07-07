@@ -61,6 +61,7 @@ Each macOS release tarball must contain:
 
 The release workflow builds:
 
+- `install-lantern.sh`
 - `lantern-vYYYY.M.PATCH-aarch64-apple-darwin.tar.gz`
 - `lantern-vYYYY.M.PATCH-x86_64-apple-darwin.tar.gz`
 - `SHA256SUMS`
@@ -77,6 +78,7 @@ gh run list --workflow release.yml --limit 5
 Confirm:
 
 - release is not a draft unless intentionally staged
+- `install-lantern.sh` is attached
 - both target tarballs are attached
 - `SHA256SUMS` is attached
 - the release workflow completed successfully

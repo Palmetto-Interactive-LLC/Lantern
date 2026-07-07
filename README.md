@@ -18,10 +18,10 @@ See [ROADMAP.md](ROADMAP.md) for the stable/experimental boundary and near-term 
 ## Prerequisites
 
 - macOS with iTerm2 for full squad launching
-- Rust stable toolchain
 - git
 - Temporal CLI for local workflow diagnostics (`brew install temporal`)
 - At least one supported agent CLI on PATH: `claude`, `codex`, `agy`, or `kimi`
+- Rust stable toolchain for source builds and local development
 
 ## Five-Minute Smoke Test
 
@@ -40,16 +40,21 @@ Expected result: the commands pass and `lantern --help` lists commands such as `
 
 ## Install Locally
 
-From a source checkout:
+Install the latest release:
 
 ```bash
-./scripts/install.sh
+curl -fsSL https://raw.githubusercontent.com/Palmetto-Interactive-LLC/Lantern/main/scripts/install.sh | sh
 source ~/.zshrc
 lantern --version
 lantern doctor
 ```
 
-The installer builds Lantern when run from the repository. When piped from GitHub, it downloads the latest release asset and verifies `SHA256SUMS` when available.
+The installer downloads the latest release asset for your Mac architecture,
+verifies `SHA256SUMS` when available, and installs Lantern under
+`~/.lantern/bin`.
+
+From a source checkout, run `./scripts/install.sh`; it builds the current tree
+instead of downloading a release unless `LANTERN_FORCE_DOWNLOAD=1` is set.
 
 ## Launch A Squad
 

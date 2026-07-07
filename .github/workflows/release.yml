@@ -116,20 +116,27 @@ jobs:
         run: |
           TAG="$RELEASE_TAG"
           if gh release view "${TAG}" >/dev/null 2>&1; then
-            EXISTING=$(gh release view "${TAG}" --json assets \
-              --jq '[.assets[].name] | map(select(endswith(".tar.gz"))) | length')
-            if [ "${EXISTING}" -gt 0 ]; then
-              echo "Release ${TAG} already has ${EXISTING} tarball asset(s) — skipping upload"
+            EXISTING_ASSETS="$(gh release view "${TAG}" --json assets --jq '.assets[].name')"
+            upload=()
+            for asset in dist/*.tar.gz dist/SHA256SUMS dist/install-lantern.sh; do
+              name="$(basename "${asset}")"
+              if ! grep -Fxq "${name}" <<<"${EXISTING_ASSETS}"; then
+                upload+=("${asset}")
+              fi
+            done
+            if [ "${#upload[@]}" -eq 0 ]; then
+              echo "Release ${TAG} already has all expected assets — skipping upload"
               gh release view "${TAG}" --json tagName,assets \
                 --jq '{tag: .tagName, assets: [.assets[].name]}'
             else
-              echo "Release ${TAG} exists without tarball assets — uploading"
-              gh release upload "${TAG}" dist/*.tar.gz dist/SHA256SUMS
+              echo "Release ${TAG} exists — uploading missing asset(s)"
+              gh release upload "${TAG}" "${upload[@]}"
             fi
           else
             gh release create "${TAG}" \
               --title "Lantern ${TAG}" \
               --generate-notes \
               dist/*.tar.gz \
-              dist/SHA256SUMS
+              dist/SHA256SUMS \
+              dist/install-lantern.sh
           fi

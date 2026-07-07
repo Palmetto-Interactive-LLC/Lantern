@@ -17,7 +17,7 @@ Services started:
 
 The Temporal dev server uses embedded file-based SQLite (`--db-filename`) for its own persistence; Lantern's projection state is a separate SQLite database. There is no PostgreSQL dependency.
 
-On macOS, Relay runs under launchd (`com.lantern.relay`). On Linux, it runs as a background process with PID at `~/.lantern/run/relay.pid`.
+On macOS, Temporal is submitted to launchd as `com.lantern.temporal` when you run `lantern up`, and Relay runs under launchd as `com.lantern.relay`. On Linux, services run as background processes with PID files under `~/.lantern/run/`.
 
 ## Check Health
 
@@ -71,14 +71,16 @@ Shows sessions, agents, terminal targets, work items, and recent events from SQL
 When Temporal is running, open:
 
 ```text
-http://127.0.0.1:8243
+http://127.0.0.1:8244
 ```
 
 Use workflow Queries, history, and Search Attributes there to verify runtime state.
 
-## Manage Relay on macOS Manually
+## Manage Services on macOS Manually
 
 ```bash
+launchctl list com.lantern.temporal
+launchctl remove com.lantern.temporal
 launchctl list com.lantern.relay
 launchctl start com.lantern.relay
 launchctl stop com.lantern.relay

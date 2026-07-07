@@ -1,4 +1,4 @@
-# CLAUDE.md — pi-code-orchestrator
+# CLAUDE.md — Lantern
 
 ## What This Repo Is
 
@@ -17,7 +17,7 @@ cargo test
 
 # Lint
 cargo fmt --check
-cargo clippy
+cargo clippy --all-targets -- -D warnings
 ```
 
 Install the binary and register the launchd service:
@@ -66,14 +66,12 @@ lantern mcp         # Start MCP server (for agents)
 
 ## CI
 
-GitHub Actions (`.github/workflows/ci.yml`): `cargo fmt --check` on push/PR to main.
-
-Note: `cargo check`, `clippy`, and `cargo test` are currently omitted from CI pending SQLite offline cache setup for sqlx. The ts-typecheck CI job will fail — no `package.json` exists in this repo.
+GitHub Actions runs Rust formatting, clippy, release build, tests, security scans, action linting, CodeQL, and release packaging. Branch protection requires the `lint`, `build-test`, `secrets-scan`, `sast`, `deps-scan`, `iac-scan`, and `actions-lint` contexts.
 
 ## Repository
 
-- Remote: `git@github.com-client:Palmetto-Interactive-LLC/pi-code-orchestrator.git`
-- SSH alias: `github.com-client`
+- Remote: `git@github-palmetto:Palmetto-Interactive-LLC/Lantern.git`
+- SSH alias: `github-palmetto`
 - Org: Palmetto-Interactive-LLC
 
 

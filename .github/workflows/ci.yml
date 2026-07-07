@@ -26,7 +26,7 @@ jobs:
       - run: cargo fmt --check
 
   clippy:
-    name: Clippy
+    name: Clippy & Docs
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -38,8 +38,9 @@ jobs:
         with:
           toolchain: stable
           components: clippy
-      - run: sudo apt-get install -y protobuf-compiler
-      - run: cargo clippy --all-targets
+      - run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
+      - run: cargo clippy --all-targets -- -D warnings
+      - run: python3 scripts/check-doc-links.py
 
   build-test:
     name: Build & Test
@@ -53,6 +54,6 @@ jobs:
       - uses: dtolnay/rust-toolchain@67ef31d5b988238dd797d409d6f9574278e20537 # master
         with:
           toolchain: stable
-      - run: sudo apt-get install -y protobuf-compiler
+      - run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
       - run: cargo build --release
       - run: cargo test

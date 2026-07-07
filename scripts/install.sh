@@ -15,13 +15,48 @@ set -eu
 
 REPO="Palmetto-Interactive-LLC/Lantern"
 LANTERN_BIN="${HOME}/.lantern/bin"
+LANTERN_HOME="${HOME}/.lantern"
 LANTERN_DATA="${HOME}/.lantern/data"
 LANTERN_LOGS="${HOME}/.lantern/logs"
 LANTERN_CONFIG="${HOME}/.lantern/config"
 LANTERN_RUN="${HOME}/.lantern/run"
+HOSTNAME_SHORT="$(hostname -s)"
 
 log() { printf '[lantern-install] %s\n' "$*"; }
 die() { log "ERROR: $*"; exit 1; }
+
+install_executable() {
+  src="$1"
+  dest="$2"
+  [ -f "$src" ] || die "Required install asset missing: $src"
+  cp "$src" "$dest"
+  chmod +x "$dest"
+}
+
+install_optional_executable() {
+  src="$1"
+  dest="$2"
+  if [ -f "$src" ]; then
+    cp "$src" "$dest"
+    chmod +x "$dest"
+  fi
+}
+
+install_launchd_plist() {
+  src="$1"
+  [ "$OS" = "Darwin" ] || return 0
+  [ -f "$src" ] || die "Required launchd plist missing: $src"
+  plist_dir="${HOME}/Library/LaunchAgents"
+  plist="${plist_dir}/com.lantern.relay.plist"
+  mkdir -p "$plist_dir"
+  sed \
+    -e "s#{{LANTERN_BIN}}#${LANTERN_BIN}#g" \
+    -e "s#{{LANTERN_LOGS}}#${LANTERN_LOGS}#g" \
+    -e "s#{{LANTERN_HOME}}#${LANTERN_HOME}#g" \
+    -e "s#{{HOSTNAME}}#${HOSTNAME_SHORT}#g" \
+    "$src" > "$plist"
+  log "Installed launchd plist: $plist"
+}
 
 # ── OS / arch check ──────────────────────────────────────────────────────────
 OS="$(uname -s)"
@@ -59,11 +94,18 @@ if [ -n "$SOURCE_DIR" ] && [ "${LANTERN_FORCE_DOWNLOAD:-0}" != "1" ]; then
   # ── Source build ──────────────────────────────────────────────────────────
   log "Source checkout detected at $SOURCE_DIR — building from source"
 
-  if ! command -v cargo >/dev/null 2>&1; then
-    log "Rust not found. Installing via rustup..."
-    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
-    # shellcheck source=/dev/null
-    . "${HOME}/.cargo/env"
+  if ! command -v cargo >/dev/null 2>&1 || ! cargo --version >/dev/null 2>&1; then
+    if command -v rustup >/dev/null 2>&1; then
+      log "Rust toolchain not configured. Installing stable toolchain via rustup..."
+      rustup default stable
+    else
+      log "Rust not found. Installing via rustup..."
+      curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+    fi
+    if [ -f "${HOME}/.cargo/env" ]; then
+      # shellcheck source=/dev/null
+      . "${HOME}/.cargo/env"
+    fi
   fi
   log "Rust: $(rustc --version)"
 
@@ -87,6 +129,16 @@ if [ -n "$SOURCE_DIR" ] && [ "${LANTERN_FORCE_DOWNLOAD:-0}" != "1" ]; then
     chmod +x "$LANTERN_BIN/$(basename "$py")"
   done
   log "iTerm2 helpers installed"
+
+  install_executable "$SOURCE_DIR/scripts/lantern-up.sh" "$LANTERN_BIN/lantern-up"
+  install_executable "$SOURCE_DIR/scripts/lantern-down.sh" "$LANTERN_BIN/lantern-down"
+  install_executable "$SOURCE_DIR/scripts/lantern-doctor.sh" "$LANTERN_BIN/lantern-doctor"
+  install_executable "$SOURCE_DIR/scripts/install.sh" "$LANTERN_BIN/lantern-install"
+  install_executable "$SOURCE_DIR/scripts/setup-iterm.sh" "$LANTERN_BIN/lantern-setup-iterm"
+  install_executable "$SOURCE_DIR/scripts/startwork.sh" "$LANTERN_BIN/startwork"
+  install_executable "$SOURCE_DIR/scripts/stopwork.sh" "$LANTERN_BIN/stopwork"
+  install_launchd_plist "$SOURCE_DIR/scripts/launchd.plist"
+  log "Lantern helper commands installed"
 
 else
   # ── Download pre-built binary ──────────────────────────────────────────────
@@ -134,8 +186,18 @@ else
   fi
 
   tar -xzf "${TMPDIR_LANTERN}/${ASSET_NAME}" -C "$TMPDIR_LANTERN"
-  cp "${TMPDIR_LANTERN}/lantern" "$LANTERN_BIN/lantern"
-  chmod +x "$LANTERN_BIN/lantern"
+  install_executable "${TMPDIR_LANTERN}/lantern" "$LANTERN_BIN/lantern"
+  install_executable "${TMPDIR_LANTERN}/lantern-up" "$LANTERN_BIN/lantern-up"
+  install_executable "${TMPDIR_LANTERN}/lantern-down" "$LANTERN_BIN/lantern-down"
+  install_executable "${TMPDIR_LANTERN}/lantern-doctor" "$LANTERN_BIN/lantern-doctor"
+  install_executable "${TMPDIR_LANTERN}/lantern-install" "$LANTERN_BIN/lantern-install"
+  install_executable "${TMPDIR_LANTERN}/lantern-setup-iterm" "$LANTERN_BIN/lantern-setup-iterm"
+  install_executable "${TMPDIR_LANTERN}/startwork" "$LANTERN_BIN/startwork"
+  install_executable "${TMPDIR_LANTERN}/stopwork" "$LANTERN_BIN/stopwork"
+  install_launchd_plist "${TMPDIR_LANTERN}/launchd.plist"
+  for py in "${TMPDIR_LANTERN}"/iterm_*.py; do
+    install_optional_executable "$py" "$LANTERN_BIN/$(basename "$py")"
+  done
 fi
 
 # Ad-hoc codesign so Gatekeeper allows execution from ~/.lantern/bin
@@ -145,7 +207,6 @@ if command -v codesign >/dev/null 2>&1; then
 fi
 
 # ── Config ───────────────────────────────────────────────────────────────────
-HOSTNAME_SHORT="$(hostname -s)"
 cat > "$LANTERN_CONFIG/lantern.toml" <<EOF
 machine_id = "${HOSTNAME_SHORT}"
 temporal_address = "127.0.0.1:8243"
@@ -158,11 +219,11 @@ EOF
 
 # ── PATH ─────────────────────────────────────────────────────────────────────
 if [ -f "${HOME}/.zshrc" ] && ! grep -q "${LANTERN_BIN}" "${HOME}/.zshrc" 2>/dev/null; then
-  printf '\n# Lantern\nexport PATH="%s:$PATH"\n' "$LANTERN_BIN" >> "${HOME}/.zshrc"
+  printf "\n# Lantern\nexport PATH=\"%s:\$PATH\"\n" "$LANTERN_BIN" >> "${HOME}/.zshrc"
   log "Added $LANTERN_BIN to PATH in ~/.zshrc"
 fi
 if [ -f "${HOME}/.bashrc" ] && ! grep -q "${LANTERN_BIN}" "${HOME}/.bashrc" 2>/dev/null; then
-  printf '\n# Lantern\nexport PATH="%s:$PATH"\n' "$LANTERN_BIN" >> "${HOME}/.bashrc"
+  printf "\n# Lantern\nexport PATH=\"%s:\$PATH\"\n" "$LANTERN_BIN" >> "${HOME}/.bashrc"
 fi
 
 # ── Done ─────────────────────────────────────────────────────────────────────

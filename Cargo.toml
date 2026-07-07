@@ -7,7 +7,7 @@ description = "Native local orchestration runtime for terminal AI coding squads"
 license = "Apache-2.0"
 repository = "https://github.com/Palmetto-Interactive-LLC/Lantern"
 homepage = "https://github.com/Palmetto-Interactive-LLC/Lantern"
-documentation = "https://github.com/Palmetto-Interactive-LLC/Lantern/wiki"
+documentation = "https://github.com/Palmetto-Interactive-LLC/Lantern/tree/main/docs"
 
 [dependencies]
 tokio = { version = "1", features = ["full"] }

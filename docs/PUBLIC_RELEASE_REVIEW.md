@@ -4,7 +4,7 @@
 **Review type:** Pre-public-release secret, sensitive-data, and public-exposure audit
 **Reviewer role:** Security specialist (`sec`)
 **Date:** 2026-06-23
-**Verification target:** integrated final tree = `prep/public-release-hardening` (ops hardening, `b4303df`) merged with the documentation branch (`pi-code-orchestrator-doc-3`, `231f469` + `78c9516`). Merge was clean (disjoint file sets); integrated verification commit `02abf86`.
+**Verification target:** integrated final tree = `prep/public-release-hardening` (ops hardening, `b4303df`) merged with the documentation branch (`231f469` + `78c9516`). Merge was clean (disjoint file sets); integrated verification commit `02abf86`.
 
 ---
 
@@ -68,7 +68,7 @@ All scans were executed with exact, reproducible commands. Scanner versions: git
 | ID | Finding | File / Path | Severity | Exposure risk | Status / Remediation | History rewrite |
 |----|---------|-------------|----------|---------------|----------------------|-----------------|
 | **F1** | Proprietary license on a repo intended for public release | `README.md`, `LICENSE`, `Cargo.toml` | ~~MEDIUM~~ → **RESOLVED** | None (legal contradiction, not a data leak) | **RESOLVED — relicensed Apache-2.0**: `LICENSE` (full Apache 2.0, 204 lines), `Cargo.toml:7 license = "Apache-2.0"`, `README.md:173` Apache-2.0 notice | N |
-| **F2** | Local SSH host alias `github.com-client` | `CLAUDE.md:75-76`; `.beads/config.yaml:68` | **LOW** | Leaks the owner's personal `~/.ssh` host-alias naming; non-functional for the public (they lack the alias) but reveals nothing secret | **ACCEPTED RESIDUAL** — left intentionally: it is accurate machine documentation, and the owner's standing policy is SSH-alias-first; rewriting it to `git@github.com` would break their push/sync. Cosmetic only. | N |
+| **F2** | Local SSH host alias `github-palmetto` | `CLAUDE.md:75-76`; `.beads/config.yaml:68` | **LOW** | Leaks the owner's personal `~/.ssh` host-alias naming; non-functional for the public (they lack the alias) but reveals nothing secret | **ACCEPTED RESIDUAL** — left intentionally: it is accurate machine documentation, and the owner's standing policy is SSH-alias-first; rewriting it to `git@github.com` would break their push/sync. Cosmetic only. | N |
 | **F3** | Developer name "Matt Lucas" in tracker audit log | `.beads/interactions.jsonl` (4 status-change records) | **INFO** | None — name is already public via git commit authorship; records contain only `status` field changes, no titles/descriptions/comments | **ACCEPTED RESIDUAL** — no action; optionally drop `.beads/interactions.jsonl` from the public export if desired | N |
 | **F4** | Org name `Palmetto-Interactive-LLC` in GitHub URLs | `README.md`, `CLAUDE.md`, docs | **INFO** | None — the repository's own identity; unavoidable and non-sensitive | No action | N |
 | **F5** | Test fixture email `t@t.co` | `src/stopwork/mod.rs:339,400` | **INFO** | None — generic placeholder used by hermetic git unit tests | No action | N |
@@ -103,7 +103,7 @@ All scans were executed with exact, reproducible commands. Scanner versions: git
 
 | Risk | Severity | Disposition |
 |------|----------|-------------|
-| **F2** — `github.com-client` SSH alias in `CLAUDE.md` / `.beads/config.yaml` | LOW | **Accepted residual.** Machine-config detail, not a secret; rewriting would break the owner's git workflow. |
+| **F2** — `github-palmetto` SSH alias in `CLAUDE.md` / `.beads/config.yaml` | LOW | **Accepted residual.** Machine-config detail, not a secret; rewriting would break the owner's git workflow. |
 | **F3** — Developer name in `.beads/interactions.jsonl` | INFO | **Accepted residual.** Already public via commit authorship; no sensitive content. |
 | **RUSTSEC-2023-0071** — `rsa` 0.9.10 "Marvin Attack" timing sidechannel, reachable via `sqlx-mysql` | MEDIUM (CVSS 5.9) | **Accepted with justification.** Flagged by qa's `cargo audit`. **No upstream fix is available.** The vulnerable code path is the **MySQL** driver's RSA handshake; **Lantern uses SQLite exclusively** (`sqlite://` connection strings only — no MySQL backend is configured or compiled into a runtime path that performs RSA). The `rsa` crate enters the dependency graph transitively through `sqlx-mysql` but is **not exercised at runtime**. Recommendation: document as an accepted risk **and** add a `cargo audit` ignore with this justification (e.g. `.cargo/audit.toml` → `[advisories] ignore = ["RUSTSEC-2023-0071"]` with a comment), and/or trim the `sqlx` MySQL feature if not needed, so CI's audit gate stays green without masking new advisories. Re-evaluate when an upstream `rsa` fix ships. |
 

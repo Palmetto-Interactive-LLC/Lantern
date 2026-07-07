@@ -42,16 +42,7 @@ jobs:
         env:
           RELEASE_TAG: ${{ github.event.inputs.tag || github.ref_name }}
         shell: bash
-        run: |
-          TAG="$RELEASE_TAG"
-          mkdir -p dist
-          for TARGET in aarch64-apple-darwin x86_64-apple-darwin; do
-            ASSET="lantern-${TAG}-${TARGET}"
-            cp "target/${TARGET}/release/lantern" dist/lantern
-            tar -czf "dist/${ASSET}.tar.gz" -C dist lantern
-            rm dist/lantern
-            (cd dist && shasum -a 256 "${ASSET}.tar.gz") >> dist/SHA256SUMS
-          done
+        run: scripts/package-release.sh "$RELEASE_TAG" aarch64-apple-darwin x86_64-apple-darwin
 
       - uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
         with:

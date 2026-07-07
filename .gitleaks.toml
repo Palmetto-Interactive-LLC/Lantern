@@ -1,4 +1,4 @@
-title = "pi-template gitleaks config"
+title = "Lantern gitleaks config"
 
 [extend]
 useDefault = true

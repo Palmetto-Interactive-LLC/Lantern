@@ -500,16 +500,18 @@ pub struct NudgeCandidate {
     pub last_nudge_at: Option<DateTime<Utc>>,
 }
 
+type NudgeCandidateRow = (
+    String,
+    String,
+    String,
+    String,
+    Option<String>,
+    Option<String>,
+);
+
 /// All agents that are busy with an active task — candidates for the nudge scan.
 pub async fn get_nudge_candidates(pool: &SqlitePool) -> anyhow::Result<Vec<NudgeCandidate>> {
-    let rows: Vec<(
-        String,
-        String,
-        String,
-        String,
-        Option<String>,
-        Option<String>,
-    )> = sqlx::query_as(
+    let rows: Vec<NudgeCandidateRow> = sqlx::query_as(
         "SELECT id, session_id, role, active_task, last_signal_at, last_nudge_at \
          FROM agents WHERE busy = 1 AND active_task IS NOT NULL",
     )

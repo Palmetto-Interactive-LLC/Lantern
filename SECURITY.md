@@ -2,29 +2,37 @@
 
 ## Reporting Vulnerabilities
 
-If you discover a security vulnerability in Lantern, please report it to the maintainers privately. **Do not open a public GitHub issue for security vulnerabilities.**
+If you discover a security vulnerability in Lantern, report it privately through GitHub private vulnerability reporting:
 
-To report a security issue:
+https://github.com/Palmetto-Interactive-LLC/Lantern/security/advisories/new
 
-1. Email the details to the project maintainers
-2. Include a clear description of the vulnerability, how to reproduce it, and the potential impact
-3. Allow reasonable time for the maintainers to respond and develop a fix before public disclosure
+Do not open a public GitHub issue for security vulnerabilities.
+
+Include:
+
+1. A clear description of the vulnerability
+2. Reproduction steps or a proof of concept
+3. The potential impact and affected versions
+4. Any known mitigations or workarounds
+
+If GitHub private vulnerability reporting is unavailable, open a public issue that asks for a private maintainer contact channel without disclosing exploit details.
 
 ## Security Considerations
 
 ### Local-Only Operation
 
-Lantern is designed to run locally on developer machines without network connectivity or remote dependencies. It does not store credentials, API keys, or sensitive data.
+Lantern is designed to run locally on developer machines without requiring Lantern-owned cloud credentials. It does not need API keys or static cloud secrets to operate.
 
-- No cloud connectivity required
-- No remote authentication or authorization flows
-- No secrets management — configure Lantern with local machine environment only
+- No Lantern-owned cloud connectivity required
+- No Lantern remote authentication or authorization flows
+- No Lantern secret-management integration
+- Agent CLIs launched by Lantern may use their own credentials and network behavior; handle those credentials according to the agent vendor's guidance
 
 ### Data Storage
 
 - SQLite database stored locally at `~/.lantern/data/relay/lantern.db`
 - Local file system access required for git worktrees and terminal management
-- No data leaves your machine unless explicitly piped through agent commands
+- Lantern does not intentionally upload its SQLite state. Data may leave your machine through the agent CLIs or commands you ask agents to run.
 
 ### Temporal Integration
 
@@ -37,6 +45,7 @@ Lantern is designed to run locally on developer machines without network connect
 - Verify checksums of downloaded binaries
 - Keep your Rust toolchain and dependencies up to date
 - Review the CONTRIBUTING.md guide before building from source
+- Treat pull requests and dependency updates as untrusted until CI and human review have completed
 
 ## Supported Versions
 

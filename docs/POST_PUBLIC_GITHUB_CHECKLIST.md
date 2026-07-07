@@ -1,6 +1,6 @@
 # Post-Public Activation Checklist
 
-Features and settings that only unlock (or become free) once `pi-code-orchestrator` is set to **Public**.
+Features and settings that only unlock (or become free) once `Lantern` is set to **Public**.
 Run these immediately after flipping visibility — do **not** run them while the repo is still private.
 
 > **Legend:** 🔵 RECOMMENDED — do this at flip time. ⚪ OPTIONAL — evaluate based on project goals.
@@ -171,22 +171,8 @@ UI: https://github.com/Palmetto-Interactive-LLC/Lantern/community
     → All green checklist items
 ```
 
-Current status (pre-flip): README ✅, LICENSE ✅, CONTRIBUTING ✅, CODE_OF_CONDUCT ✅,
-SECURITY ✅, CODEOWNERS ✅. Missing: Pull Request template (optional).
-
-**Add PR template (optional):**
-```bash
-mkdir -p .github && cat > .github/PULL_REQUEST_TEMPLATE.md << 'EOF'
-## Summary
-
-## Test plan
-
-## Checklist
-- [ ] `cargo fmt --check` passes
-- [ ] `cargo clippy` clean
-- [ ] `cargo test` passes
-EOF
-```
+Current status (pre-flip): README, LICENSE, CONTRIBUTING, CODE_OF_CONDUCT,
+SECURITY, CODEOWNERS, issue templates, and pull request template are present.
 
 ---
 

@@ -492,17 +492,31 @@ pub async fn handle_report_status(pool: &SqlitePool, args: Value) -> anyhow::Res
 /// Persist a dispatch row + inject the dispatch prompt to the target pane. Shared
 /// by `devorch_dispatch_task` and the auto-heal re-decompose/resume paths so all
 /// dispatches are durable and rendered identically (with blackboard cards).
+struct DispatchEnvelope<'a> {
+    session: &'a str,
+    from_role: &'a str,
+    to_role: &'a str,
+    task_id: &'a str,
+    summary: &'a str,
+    files: &'a [String],
+    next_action: Option<&'a str>,
+    priority: &'a str,
+}
+
 async fn dispatch_and_inject(
     pool: &SqlitePool,
-    session: &str,
-    from_role: &str,
-    to_role: &str,
-    task_id: &str,
-    summary: &str,
-    files: &[String],
-    next_action: Option<&str>,
-    priority: &str,
+    dispatch: DispatchEnvelope<'_>,
 ) -> anyhow::Result<String> {
+    let DispatchEnvelope {
+        session,
+        from_role,
+        to_role,
+        task_id,
+        summary,
+        files,
+        next_action,
+        priority,
+    } = dispatch;
     let message_id = format!(
         "dispatch-{}-{}",
         uuid::Uuid::new_v4()
@@ -593,14 +607,16 @@ async fn handle_auto_heal(pool: &SqlitePool, report: &StatusReport) {
                     );
                     if let Err(e) = dispatch_and_inject(
                         pool,
-                        session,
-                        "orchestrator",
-                        "ai",
-                        &sub_task,
-                        &summary,
-                        &[],
-                        None,
-                        "high",
+                        DispatchEnvelope {
+                            session,
+                            from_role: "orchestrator",
+                            to_role: "ai",
+                            task_id: &sub_task,
+                            summary: &summary,
+                            files: &[],
+                            next_action: None,
+                            priority: "high",
+                        },
                     )
                     .await
                     {
@@ -646,14 +662,16 @@ async fn handle_auto_heal(pool: &SqlitePool, report: &StatusReport) {
                             let resume = "[RESUMED TASK] The blocker has been automatically resolved. Please rerun validation and proceed to completion.";
                             if let Err(e) = dispatch_and_inject(
                                 pool,
-                                session,
-                                "orchestrator",
-                                &parent_role,
-                                &parent,
-                                resume,
-                                &[],
-                                None,
-                                "high",
+                                DispatchEnvelope {
+                                    session,
+                                    from_role: "orchestrator",
+                                    to_role: &parent_role,
+                                    task_id: &parent,
+                                    summary: resume,
+                                    files: &[],
+                                    next_action: None,
+                                    priority: "high",
+                                },
                             )
                             .await
                             {
@@ -1023,14 +1041,16 @@ async fn dispatch_task_inner(pool: &SqlitePool, params: &Value) -> anyhow::Resul
     // [orchestrator:dispatch] prompt (with shared blackboard cards) — no Temporal.
     let message_id = dispatch_and_inject(
         pool,
-        session,
-        from_role,
-        to_role,
-        task_id,
-        summary,
-        &files,
-        next_action,
-        priority,
+        DispatchEnvelope {
+            session,
+            from_role,
+            to_role,
+            task_id,
+            summary,
+            files: &files,
+            next_action,
+            priority,
+        },
     )
     .await?;
 
@@ -1156,6 +1176,141 @@ async fn orchestrator_inbox_inner(pool: &SqlitePool, params: &Value) -> anyhow::
     Ok(ok_text(
         serde_json::to_string_pretty(&inbox).unwrap_or_else(|_| "[]".to_string()),
     ))
+}
+
+pub async fn handle_ping(pool: &SqlitePool, args: Value) -> anyhow::Result<Value> {
+    enforce_scope(&args, "devorch_ping")?;
+    let mut mapped_args = args.clone();
+    mapped_args["info"] = json!("ping");
+    mapped_args["requested_action"] = json!("status_update");
+    handle_peer_message(pool, mapped_args).await
+}
+
+pub async fn handle_ack(pool: &SqlitePool, args: Value) -> anyhow::Result<Value> {
+    enforce_scope(&args, "devorch_ack")?;
+    let mut mapped_args = args.clone();
+    mapped_args["status"] = json!("ack");
+
+    let summary = mapped_args
+        .get("summary")
+        .and_then(|v| v.as_str())
+        .map(|s| s.trim())
+        .unwrap_or("");
+
+    if summary.is_empty()
+        || summary.eq_ignore_ascii_case("pong")
+        || summary.eq_ignore_ascii_case("Task acknowledged")
+    {
+        // Look up the active work item for this agent/role to provide a meaningful status update
+        let role = mapped_args
+            .get("role")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        let session = mapped_args
+            .get("session")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+
+        let mut custom_summary = "Awaiting task assignment. Ready for next sprint.".to_string();
+
+        if !role.is_empty() && !session.is_empty() {
+            if let Ok(agents) = queries::get_agents_for_session(pool, session).await {
+                if let Some(agent) = agents.into_iter().find(|a| a.role == role) {
+                    let active_work = sqlx::query(
+                        "SELECT task_id, summary FROM work_items WHERE target_agent_id = ? AND status IN ('leased','delivered','acked','in_progress','blocked') ORDER BY created_at DESC LIMIT 1"
+                    )
+                    .bind(&agent.id)
+                    .fetch_optional(pool)
+                    .await;
+
+                    if let Ok(Some(row)) = active_work {
+                        let task_id: String = row.try_get("task_id").unwrap_or_default();
+                        let task_summary: String = row.try_get("summary").unwrap_or_default();
+                        custom_summary = format!(
+                            "Acknowledged status ping. Active on task #{} ({})",
+                            task_id, task_summary
+                        );
+                    }
+                }
+            }
+        }
+
+        mapped_args["summary"] = json!(custom_summary);
+    }
+
+    handle_report_status(pool, mapped_args).await
+}
+
+pub async fn handle_blocker(pool: &SqlitePool, args: Value) -> anyhow::Result<Value> {
+    enforce_scope(&args, "devorch_blocker")?;
+    let mut mapped_args = args.clone();
+    mapped_args["status"] = json!("blocked");
+    if mapped_args.get("summary").is_none() {
+        mapped_args["summary"] = json!("Encountered a blocker");
+    }
+    handle_report_status(pool, mapped_args).await
+}
+
+/// Tool: devorch_event_subscribe — register `role`'s interest in `event_type`.
+///
+/// Input: `{ session, role, event_type }`
+pub async fn handle_event_subscribe(pool: &SqlitePool, args: Value) -> anyhow::Result<Value> {
+    let session = require_str(&args, "session").map_err(|e| anyhow::anyhow!("{e}"))?;
+    let role = require_str(&args, "role").map_err(|e| anyhow::anyhow!("{e}"))?;
+    let event_type = require_str(&args, "event_type").map_err(|e| anyhow::anyhow!("{e}"))?;
+
+    queries::add_subscription(pool, session, event_type, role).await?;
+    Ok(ok_text(format!(
+        "Subscribed {role} to event '{event_type}' for {session}."
+    )))
+}
+
+/// Tool: devorch_event_publish — fan out an MCP event to subscribed busy panes.
+///
+/// Input: `{ session, event_type, publisher, payload? }`
+pub async fn handle_event_publish(pool: &SqlitePool, args: Value) -> anyhow::Result<Value> {
+    let session = require_str(&args, "session").map_err(|e| anyhow::anyhow!("{e}"))?;
+    let event_type = require_str(&args, "event_type").map_err(|e| anyhow::anyhow!("{e}"))?;
+    let publisher = require_str(&args, "publisher").map_err(|e| anyhow::anyhow!("{e}"))?;
+    let payload = args.get("payload").cloned().unwrap_or(Value::Null);
+
+    let fanout = publish_event(pool, session, event_type, publisher, &payload).await?;
+    Ok(ok_text(format!(
+        "Published '{event_type}' from {publisher}; injected to {fanout} subscribed busy pane(s)."
+    )))
+}
+
+/// Fan out an MCP event to every subscribed role whose pane is busy. Returns the
+/// number of panes injected. Reusable by an internal publish path too.
+pub async fn publish_event(
+    pool: &SqlitePool,
+    session: &str,
+    event_type: &str,
+    publisher: &str,
+    payload: &Value,
+) -> anyhow::Result<usize> {
+    let roles = queries::list_subscribed_roles(pool, session, event_type).await?;
+    if roles.is_empty() {
+        return Ok(0);
+    }
+    let agents = queries::get_agents_for_session(pool, session).await?;
+    let text = format_mcp_event(event_type, publisher, payload);
+
+    let mut count = 0;
+    for role in roles {
+        // Only deliver to busy subscribed panes (parity with the TS broadcast,
+        // which targeted active execution windows).
+        let is_busy = agents
+            .iter()
+            .find(|a| a.role == role)
+            .map(|a| a.status == "busy")
+            .unwrap_or(false);
+        if is_busy {
+            try_inject(pool, session, &role, &text).await;
+            count += 1;
+        }
+    }
+    Ok(count)
 }
 
 #[cfg(test)]
@@ -1737,139 +1892,4 @@ mod tests {
         assert!(parse_session("nosession").is_err());
         assert!(parse_session("name-xyz").is_err());
     }
-}
-
-pub async fn handle_ping(pool: &SqlitePool, args: Value) -> anyhow::Result<Value> {
-    enforce_scope(&args, "devorch_ping")?;
-    let mut mapped_args = args.clone();
-    mapped_args["info"] = json!("ping");
-    mapped_args["requested_action"] = json!("status_update");
-    handle_peer_message(pool, mapped_args).await
-}
-
-pub async fn handle_ack(pool: &SqlitePool, args: Value) -> anyhow::Result<Value> {
-    enforce_scope(&args, "devorch_ack")?;
-    let mut mapped_args = args.clone();
-    mapped_args["status"] = json!("ack");
-
-    let summary = mapped_args
-        .get("summary")
-        .and_then(|v| v.as_str())
-        .map(|s| s.trim())
-        .unwrap_or("");
-
-    if summary.is_empty()
-        || summary.eq_ignore_ascii_case("pong")
-        || summary.eq_ignore_ascii_case("Task acknowledged")
-    {
-        // Look up the active work item for this agent/role to provide a meaningful status update
-        let role = mapped_args
-            .get("role")
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
-        let session = mapped_args
-            .get("session")
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
-
-        let mut custom_summary = "Awaiting task assignment. Ready for next sprint.".to_string();
-
-        if !role.is_empty() && !session.is_empty() {
-            if let Ok(agents) = queries::get_agents_for_session(pool, session).await {
-                if let Some(agent) = agents.into_iter().find(|a| a.role == role) {
-                    let active_work = sqlx::query(
-                        "SELECT task_id, summary FROM work_items WHERE target_agent_id = ? AND status IN ('leased','delivered','acked','in_progress','blocked') ORDER BY created_at DESC LIMIT 1"
-                    )
-                    .bind(&agent.id)
-                    .fetch_optional(pool)
-                    .await;
-
-                    if let Ok(Some(row)) = active_work {
-                        let task_id: String = row.try_get("task_id").unwrap_or_default();
-                        let task_summary: String = row.try_get("summary").unwrap_or_default();
-                        custom_summary = format!(
-                            "Acknowledged status ping. Active on task #{} ({})",
-                            task_id, task_summary
-                        );
-                    }
-                }
-            }
-        }
-
-        mapped_args["summary"] = json!(custom_summary);
-    }
-
-    handle_report_status(pool, mapped_args).await
-}
-
-pub async fn handle_blocker(pool: &SqlitePool, args: Value) -> anyhow::Result<Value> {
-    enforce_scope(&args, "devorch_blocker")?;
-    let mut mapped_args = args.clone();
-    mapped_args["status"] = json!("blocked");
-    if mapped_args.get("summary").is_none() {
-        mapped_args["summary"] = json!("Encountered a blocker");
-    }
-    handle_report_status(pool, mapped_args).await
-}
-
-/// Tool: devorch_event_subscribe — register `role`'s interest in `event_type`.
-///
-/// Input: `{ session, role, event_type }`
-pub async fn handle_event_subscribe(pool: &SqlitePool, args: Value) -> anyhow::Result<Value> {
-    let session = require_str(&args, "session").map_err(|e| anyhow::anyhow!("{e}"))?;
-    let role = require_str(&args, "role").map_err(|e| anyhow::anyhow!("{e}"))?;
-    let event_type = require_str(&args, "event_type").map_err(|e| anyhow::anyhow!("{e}"))?;
-
-    queries::add_subscription(pool, session, event_type, role).await?;
-    Ok(ok_text(format!(
-        "Subscribed {role} to event '{event_type}' for {session}."
-    )))
-}
-
-/// Tool: devorch_event_publish — fan out an MCP event to subscribed busy panes.
-///
-/// Input: `{ session, event_type, publisher, payload? }`
-pub async fn handle_event_publish(pool: &SqlitePool, args: Value) -> anyhow::Result<Value> {
-    let session = require_str(&args, "session").map_err(|e| anyhow::anyhow!("{e}"))?;
-    let event_type = require_str(&args, "event_type").map_err(|e| anyhow::anyhow!("{e}"))?;
-    let publisher = require_str(&args, "publisher").map_err(|e| anyhow::anyhow!("{e}"))?;
-    let payload = args.get("payload").cloned().unwrap_or(Value::Null);
-
-    let fanout = publish_event(pool, session, event_type, publisher, &payload).await?;
-    Ok(ok_text(format!(
-        "Published '{event_type}' from {publisher}; injected to {fanout} subscribed busy pane(s)."
-    )))
-}
-
-/// Fan out an MCP event to every subscribed role whose pane is busy. Returns the
-/// number of panes injected. Reusable by an internal publish path too.
-pub async fn publish_event(
-    pool: &SqlitePool,
-    session: &str,
-    event_type: &str,
-    publisher: &str,
-    payload: &Value,
-) -> anyhow::Result<usize> {
-    let roles = queries::list_subscribed_roles(pool, session, event_type).await?;
-    if roles.is_empty() {
-        return Ok(0);
-    }
-    let agents = queries::get_agents_for_session(pool, session).await?;
-    let text = format_mcp_event(event_type, publisher, payload);
-
-    let mut count = 0;
-    for role in roles {
-        // Only deliver to busy subscribed panes (parity with the TS broadcast,
-        // which targeted active execution windows).
-        let is_busy = agents
-            .iter()
-            .find(|a| a.role == role)
-            .map(|a| a.status == "busy")
-            .unwrap_or(false);
-        if is_busy {
-            try_inject(pool, session, &role, &text).await;
-            count += 1;
-        }
-    }
-    Ok(count)
 }

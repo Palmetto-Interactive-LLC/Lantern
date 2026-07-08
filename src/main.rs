@@ -55,6 +55,8 @@ enum Commands {
         /// Fetch models.json from GitHub and write it to the local cache
         #[arg(long)]
         sync: bool,
+        /// Optional action: `sync` (same as --sync; the form the docs use)
+        action: Option<String>,
     },
     /// Tail logs for a service
     Logs {
@@ -173,7 +175,14 @@ async fn main() -> anyhow::Result<()> {
         Commands::Doctor => commands::doctor().await,
         Commands::DoctorState { fix } => commands::doctor_state(fix).await,
         Commands::Status => commands::status().await,
-        Commands::Models { sync } => commands::models(sync).await,
+        Commands::Models { sync, action } => {
+            let do_sync = match action.as_deref() {
+                None => sync,
+                Some("sync") => true,
+                Some(other) => anyhow::bail!("unknown models action '{other}' (expected: sync)"),
+            };
+            commands::models(do_sync).await
+        }
         Commands::Logs { service } => commands::logs(&service).await,
         Commands::Relay { machine } => commands::relay(&machine).await,
         Commands::Pause { agent } => commands::pause(&agent).await,
@@ -309,6 +318,26 @@ mod commands {
 
     pub async fn restart() -> anyhow::Result<()> {
         down().await?;
+        // `lantern-down` returns before launchd finishes tearing the Temporal
+        // process down; starting a new server while the old one still holds
+        // the Temporal port fails its bind. Wait (up to 10s) for the port to
+        // free before bringing services back up.
+        let temporal_addr: std::net::SocketAddr = config::Config::load()
+            .map(|c| c.temporal_address)
+            .unwrap_or_else(|_| "127.0.0.1:8243".to_string())
+            .parse()
+            .unwrap_or_else(|_| "127.0.0.1:8243".parse().expect("static addr parses"));
+        for _ in 0..40 {
+            if std::net::TcpStream::connect_timeout(
+                &temporal_addr,
+                std::time::Duration::from_millis(250),
+            )
+            .is_err()
+            {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+        }
         up().await
     }
 

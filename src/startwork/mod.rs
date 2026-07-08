@@ -134,10 +134,8 @@ pub async fn launch(
             let agent_str = team_agent_override.unwrap_or_else(|| agent.as_str());
             launch_team(name, number, Some(agent_str), no_init, pattern_slug).await
         }
-        patterns::LaunchPattern::Executor { .. } => {
-            anyhow::bail!(
-                "--pattern executor is not implemented yet in this build (Phase 1 foundation only)"
-            )
+        patterns::LaunchPattern::Executor { executor } => {
+            launch_executor(name, number, no_init, executor.clone(), pattern_slug).await
         }
         patterns::LaunchPattern::SimpleOrchestrator { .. } => {
             anyhow::bail!(
@@ -150,6 +148,461 @@ pub async fn launch(
             )
         }
     }
+}
+
+/// Launch the Executor pattern: one worktree `executor` pane running the
+/// user-picked model, a non-worktree `advisor` pane (always Fable 5 XHIGH)
+/// sharing the executor's directory, and the usual `inp` input router.
+///
+/// Reuses the same worktree/skill-sync/MCP-registration/agent-registration
+/// helpers `launch_team` uses; only the pane layout (3 panes, not 10) and the
+/// window-def construction are Executor-specific.
+async fn launch_executor(
+    name: Option<&str>,
+    number: Option<u32>,
+    no_init: bool,
+    executor_model: patterns::ModelChoice,
+    pattern_slug: &str,
+) -> Result<()> {
+    let repo = find_git_repo()?;
+    ensure_squad_services();
+    let repo_name = repo
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("workspace")
+        .to_string();
+    let config = crate::config::Config::load()?;
+    let db_pool = crate::db::init_db(&config.database_url).await?;
+
+    let name = name.unwrap_or(&repo_name);
+    let number = match number {
+        Some(n) => n,
+        None => allocate_session_number(&db_pool, &repo, name).await,
+    };
+    let session_id = workspace_session_id(name, number);
+    let worktree_root = repo.join(".claude").join("worktrees").join(&session_id);
+
+    if worktree_root.exists() {
+        anyhow::bail!(
+            "worktree root {} already exists. Pick a different number or clean up manually.",
+            worktree_root.display()
+        );
+    }
+
+    info!(repo = %repo.display(), session = %session_id, "Launching executor-pattern workspace");
+
+    let _ = ensure_antigravity_project_trusted(&repo);
+    let _ = ensure_gemini_project_trusted(&repo);
+
+    // The executor is the only worktree in this pattern; advisor and inp share
+    // its directory (advisor.needs_worktree = false — see patterns::executor()).
+    let executor_worktree =
+        create_orchestrator_worktree(&repo, &worktree_root, &session_id).await?;
+
+    let run_id = format!(
+        "{}-{}",
+        session_id,
+        chrono::Utc::now().format("%Y%m%dT%H%M%SZ")
+    );
+    let runtime_identity = RuntimeIdentityEnv::new(
+        &repo,
+        name,
+        &config.temporal_namespace,
+        DEVORCH_DEFAULT_TASK_QUEUE,
+    );
+
+    // Minimal input router: plain text routes to `executor`; `/advisor <text>`
+    // routes to the advisor pane. Mirrors the team pattern's router script,
+    // trimmed to this pattern's two addressable roles.
+    let router_script_path = format!("/tmp/devorch-input-router-{}.py", session_id);
+    let router_script_content = format!(
+        r#"import sys, os, subprocess, select
+try:
+    import readline
+    readline.set_history_length(100)
+except ImportError:
+    pass
+session = '{session_id}'
+sys.stdout.write(f'\x1b]0;INPUT - {{session}}\x07\x1b]1;INPUT - {{session}}\x07\x1b]2;INPUT - {{session}}\x07')
+sys.stdout.flush()
+print('\x1b[1;36m====================================================\x1b[0m')
+print('\x1b[1;37m                  INPUT ROUTER                     \x1b[0m')
+print('\x1b[1;36m====================================================\x1b[0m')
+print('Type your note. Press Enter to submit (Ctrl-D for multiline).')
+print('Prefix with "/advisor " to route to the advisor pane; default is executor.\n')
+
+def process_cmd(cmd):
+    cmd = cmd.strip()
+    if not cmd:
+        return
+    if cmd.startswith('/advisor '):
+        target_role = 'advisor'
+        actual_cmd = cmd[len('/advisor '):].strip()
+    elif cmd == '/advisor':
+        target_role = 'advisor'
+        actual_cmd = ''
+    else:
+        target_role = 'executor'
+        actual_cmd = cmd
+
+    print(f'\x1b[1;33mRouting note to {{target_role.upper()}}: "{{actual_cmd}}"\x1b[0m')
+
+    env = os.environ.copy()
+    env['DEVORCH_SESSION'] = '{session_id}'
+    env['DEVORCH_RUN_ID'] = '{run_id}'
+    env['DEVORCH_REPO_ID'] = '{repo_id}'
+    env['DEVORCH_REPO_ROOT'] = '{repo_root}'
+    env['DEVORCH_TEMPORAL_NAMESPACE'] = '{temporal_namespace}'
+    env['DEVORCH_TASK_QUEUE'] = '{task_queue}'
+    subprocess.run(['lantern', 'note', target_role, actual_cmd], env=env)
+
+    if actual_cmd:
+        try:
+            import iterm2
+
+            def find_session_by_role(app, session_id, role):
+                parts = session_id.rsplit("-", 1)
+                if len(parts) == 2:
+                    project_slug, slot = parts
+                    target_contains = f"{{project_slug}}-{{role}}-{{slot}}"
+                else:
+                    target_contains = f"{{session_id}}-{{role}}"
+                for w in app.windows:
+                    for t in w.tabs:
+                        for s in t.sessions:
+                            name = s.name or ""
+                            if target_contains in name:
+                                return s
+                return None
+
+            async def inject(connection):
+                app = await iterm2.async_get_app(connection)
+                s = find_session_by_role(app, session, target_role)
+                if s:
+                    await s.async_send_text(actual_cmd)
+                    import asyncio
+                    await asyncio.sleep(0.05)
+                    await s.async_send_text("\r")
+
+            iterm2.run_until_complete(inject)
+        except Exception as e:
+            import sys
+            print(f"Error injecting to iTerm2 pane: {{e}}", file=sys.stderr)
+
+def edit_loop():
+    lines = []
+    while True:
+        try:
+            prompt = '\x1b[1;32m[INPUT] ❯ \x1b[0m' if not lines else '          '
+            line = input(prompt)
+            lines.append(line)
+            if not select.select([sys.stdin], [], [], 0.05)[0]:
+                break
+        except EOFError:
+            break
+        except KeyboardInterrupt:
+            raise
+    return '\n'.join(lines)
+
+try:
+    while True:
+        try:
+            cmd = edit_loop()
+        except (KeyboardInterrupt, EOFError):
+            break
+        if cmd.strip():
+            process_cmd(cmd)
+finally:
+    sys.stdout.write('\r\n')
+    sys.stdout.flush()"#,
+        session_id = session_id,
+        run_id = run_id,
+        repo_id = name,
+        repo_root = runtime_identity.repo_root,
+        temporal_namespace = runtime_identity.temporal_namespace,
+        task_queue = runtime_identity.task_queue,
+    );
+    let _ = std::fs::write(&router_script_path, &router_script_content);
+
+    let advisor_model = patterns::advisor_model();
+
+    let mut window_defs: Vec<WindowDef> = Vec::with_capacity(3);
+
+    // executor pane (worktree)
+    {
+        let role = "executor";
+        let init = if no_init {
+            None
+        } else {
+            Some(format!(
+                "Fetch your initialization instructions by calling the `devorch_get_setup_instructions` MCP tool immediately. Use session={}, role={}, agent={}, repo_id={}, temporal_namespace={}.",
+                session_id, role, executor_model.agent.as_str(), name, runtime_identity.temporal_namespace
+            ))
+        };
+        let env = base_window_env(
+            &runtime_identity,
+            &session_id,
+            &run_id,
+            role,
+            name,
+            number,
+            pattern_slug,
+        );
+        window_defs.push(WindowDef {
+            name: session_id.clone(),
+            label: "EXEC".to_string(),
+            color: (30, 32, 35),
+            dir: executor_worktree.to_string_lossy().to_string(),
+            env,
+            cmd: build_model_agent_command(
+                &executor_model,
+                role,
+                init.as_deref(),
+                Some(&session_id),
+            ),
+            agent_kind: executor_model.agent.as_str().to_string(),
+        });
+    }
+
+    // advisor pane — SAME directory as executor, no worktree of its own.
+    {
+        let role = "advisor";
+        let init = if no_init {
+            None
+        } else {
+            Some(format!(
+                "Fetch your initialization instructions by calling the `devorch_get_setup_instructions` MCP tool immediately. Use session={}, role={}, agent={}, repo_id={}, temporal_namespace={}.",
+                session_id, role, advisor_model.agent.as_str(), name, runtime_identity.temporal_namespace
+            ))
+        };
+        let env = base_window_env(
+            &runtime_identity,
+            &session_id,
+            &run_id,
+            role,
+            name,
+            number,
+            pattern_slug,
+        );
+        window_defs.push(WindowDef {
+            name: format!("{}-advisor", session_id),
+            label: "ADVISOR".to_string(),
+            color: (45, 27, 83),
+            dir: executor_worktree.to_string_lossy().to_string(),
+            env,
+            cmd: build_model_agent_command(&advisor_model, role, init.as_deref(), None),
+            agent_kind: advisor_model.agent.as_str().to_string(),
+        });
+    }
+
+    // inp pane
+    {
+        let role = "input";
+        let env = base_window_env(
+            &runtime_identity,
+            &session_id,
+            &run_id,
+            role,
+            name,
+            number,
+            pattern_slug,
+        );
+        let input_cmd = format!("python3 /tmp/devorch-input-router-{}.py", session_id);
+        window_defs.push(WindowDef {
+            name: format!("{}-inp-{}", name, number),
+            label: "INPUT".to_string(),
+            color: (45, 45, 45),
+            dir: executor_worktree.to_string_lossy().to_string(),
+            env,
+            cmd: input_cmd,
+            agent_kind: "none".to_string(),
+        });
+    }
+
+    sync_skills_parallel(std::slice::from_ref(&executor_worktree)).await;
+    trust_workspaces(std::slice::from_ref(&executor_worktree)).await;
+
+    let unique_agents: std::collections::HashSet<String> = window_defs
+        .iter()
+        .map(|w| w.agent_kind.to_ascii_lowercase())
+        .collect();
+    for agent in &unique_agents {
+        if agent != "kimi" && agent != "none" {
+            ensure_mcp_server_registered(agent);
+        }
+    }
+
+    let titles_by_role = build_titles_by_role(&window_defs);
+    let startup_by_role = build_startup_commands(&window_defs, &session_id);
+    let init_by_role = build_init_by_role(&window_defs, no_init);
+    let iterm_sessions =
+        create_executor_iterm_layout(&session_id, &titles_by_role, &startup_by_role).await?;
+    if iterm_sessions.len() != 3 {
+        anyhow::bail!(
+            "expected 3 iTerm2 sessions for the executor pattern, got {}",
+            iterm_sessions.len()
+        );
+    }
+
+    if !init_by_role.is_empty() {
+        run_batch_init(&session_id, &init_by_role, &iterm_sessions, &titles_by_role).await;
+    }
+
+    for wdef in window_defs.iter() {
+        let role = wdef
+            .env
+            .get("DEVORCH_ROLE")
+            .map(|s| s.as_str())
+            .unwrap_or("unknown");
+        let iterm_session_id = iterm_sessions
+            .get(role)
+            .map(|s| &s[..s.len().min(8)])
+            .unwrap_or("?");
+        println!(
+            "  + {:<32} {} (iterm: {})",
+            wdef.name, wdef.label, iterm_session_id
+        );
+    }
+
+    queries::insert_machine(&db_pool, &config.machine_id).await?;
+    let session = Session {
+        id: session_id.clone(),
+        machine_id: config.machine_id.clone(),
+        project_slug: name.to_string(),
+        slot_number: number as i64,
+        status: "active".to_string(),
+        created_at: chrono::Utc::now(),
+        pattern: pattern_slug.to_string(),
+    };
+    queries::insert_session(&db_pool, &session).await?;
+
+    register_agents_parallel(
+        &db_pool,
+        &session_id,
+        name,
+        number,
+        &window_defs,
+        &iterm_sessions,
+    )
+    .await?;
+
+    println!(
+        "\nWorkspace ready — iTerm2 window opened for session '{}'.",
+        session_id
+    );
+    println!("Executor pane is active. Switch to iTerm2 to begin.");
+
+    Ok(())
+}
+
+/// Build the CLI invocation for a pattern-selected `ModelChoice` (executor /
+/// advisor / simple / fixbug panes). Unlike `build_agent_command` (which
+/// derives the model from a fixed team-role lookup table), this launches the
+/// exact model the user picked from the pattern menus.
+fn build_model_agent_command(
+    model: &patterns::ModelChoice,
+    _role: &str,
+    init: Option<&str>,
+    pane_name: Option<&str>,
+) -> String {
+    let suffix = init
+        .map(|s| format!(" {}", shell_escape(s)))
+        .unwrap_or_default();
+    match model.agent {
+        patterns::AgentKind::Claude => {
+            let name_arg = pane_name
+                .map(|n| format!(" --name {}", shell_escape(n)))
+                .unwrap_or_default();
+            format!(
+                "claude --model {} --dangerously-skip-permissions{}{}",
+                model.model_id, name_arg, suffix
+            )
+        }
+        patterns::AgentKind::Codex => {
+            let remote = pane_name
+                .map(|n| {
+                    format!(
+                        "--remote {} ",
+                        shell_escape(&format!("unix://codex-devorch-sockets/{}.sock", n))
+                    )
+                })
+                .unwrap_or_default();
+            let cd_arg = if pane_name.is_some() {
+                "--cd \"$workdir\" "
+            } else {
+                ""
+            };
+            let codex_cmd = format!(
+                "codex {}{}--model {} -c 'model_reasoning_effort=\"{}\"' -c shell_environment_policy.inherit=all --dangerously-bypass-approvals-and-sandbox{}",
+                remote, cd_arg, model.model_id, model.effort, suffix
+            );
+            if let Some(name) = pane_name {
+                codex_app_server_wrapper(name, &codex_cmd)
+            } else {
+                codex_cmd
+            }
+        }
+        // Gemini launch flags are not yet verified against the live CLI in this
+        // pattern; falls back to a best-effort invocation. TODO(patterns): wire
+        // up the real `gemini` CLI flags once verified (tracked for whichever
+        // agent owns the Gemini menu path).
+        patterns::AgentKind::Gemini | patterns::AgentKind::Kimi | patterns::AgentKind::Goose => {
+            format!(
+                "claude --model {} --dangerously-skip-permissions{}",
+                model.model_id, suffix
+            )
+        }
+    }
+}
+
+/// Open the 3-pane Executor layout (executor/advisor/inp) via
+/// `iterm_executor.py`. Mirrors `create_iterm_layout`'s file-handoff protocol.
+async fn create_executor_iterm_layout(
+    session_id: &str,
+    titles_by_role: &std::collections::HashMap<String, String>,
+    startup_by_role: &std::collections::HashMap<String, String>,
+) -> Result<std::collections::HashMap<String, String>> {
+    let script_path = crate::terminal::locate_script("iterm_executor.py")?;
+
+    let startup_file = format!("/tmp/devorch-iterm-startup-{}.json", session_id);
+    let titles_file = format!("/tmp/devorch-iterm-titles-{}.json", session_id);
+    std::fs::write(
+        &startup_file,
+        serde_json::to_string(startup_by_role).context("serialize startup commands")?,
+    )?;
+    std::fs::write(
+        &titles_file,
+        serde_json::to_string(titles_by_role).context("serialize pane titles")?,
+    )?;
+
+    let cmd_args = [
+        script_path.to_str().context("non-UTF-8 script path")?,
+        "--session",
+        session_id,
+        "--titles-file",
+        &titles_file,
+        "--startup-file",
+        &startup_file,
+    ];
+
+    let output = Command::new("python3")
+        .args(cmd_args)
+        .output()
+        .await
+        .context("failed to launch iterm_executor.py")?;
+
+    let _ = std::fs::remove_file(&startup_file);
+    let _ = std::fs::remove_file(&titles_file);
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        anyhow::bail!("iterm_executor.py failed: {}", stderr.trim());
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let map: std::collections::HashMap<String, String> = serde_json::from_str(stdout.trim())
+        .with_context(|| format!("iterm_executor.py returned invalid JSON: {}", stdout.trim()))?;
+    Ok(map)
 }
 
 /// Launch a new squad workspace using the legacy 4x2+1 team grid.

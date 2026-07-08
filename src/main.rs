@@ -6,6 +6,7 @@ mod doctor_state;
 mod human;
 mod mcp;
 mod models_registry;
+mod prompts;
 mod recovery;
 mod startwork;
 mod stopwork;

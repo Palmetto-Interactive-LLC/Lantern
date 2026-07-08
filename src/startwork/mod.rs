@@ -23,7 +23,7 @@ use crate::types::{generate_id, Agent, Session, TerminalTarget};
 pub mod menu;
 pub mod patterns;
 
-use patterns::PatternConfig;
+use patterns::{AgentKind, ModelChoice, PatternConfig};
 
 /// Teams in the squad grid (4×2 + 1 qa).
 pub(crate) const GRID_ORDER: &[&str] = &[
@@ -914,6 +914,16 @@ fn build_agent_command(
                 shell_escape(&crate::delivery::acp::devorch_extension_value()),
             )
         }
+        "gemini" => {
+            // gemini CLI (`gemini --help`) has no reasoning-effort/thinking
+            // flag as of this writing; `-i/--prompt-interactive` runs the
+            // init prompt then continues interactively, mirroring how the
+            // other TUIs get their init message.
+            let prompt_arg = init
+                .map(|s| format!(" --prompt-interactive {}", shell_escape(s)))
+                .unwrap_or_default();
+            format!("gemini --model {}{}", model, prompt_arg)
+        }
         _ => {
             format!(
                 "claude --model {} --dangerously-skip-permissions{}",
@@ -922,6 +932,100 @@ fn build_agent_command(
         }
     };
     cmd
+}
+
+/// Build the CLI invocation for a `ModelChoice` (agent kind + model id +
+/// effort) directly, independent of the role-based `get_model_for_role`
+/// lookup. Used by the non-team launch patterns (executor / simple / fixbug);
+/// the legacy `TeamOrchestrator` path keeps using `build_agent_command` +
+/// `get_model_for_role` unchanged.
+pub fn build_agent_command_for(
+    choice: &ModelChoice,
+    init: Option<&str>,
+    pane_name: Option<&str>,
+) -> String {
+    let suffix = init
+        .map(|s| format!(" {}", shell_escape(s)))
+        .unwrap_or_default();
+    let model = choice.model_id.as_str();
+    let effort = choice.effort.as_str();
+    match choice.agent {
+        AgentKind::Claude => {
+            let name_arg = pane_name
+                .map(|n| format!(" --name {}", shell_escape(n)))
+                .unwrap_or_default();
+            format!(
+                "claude --model {} --effort {} --dangerously-skip-permissions{}{}",
+                model, effort, name_arg, suffix
+            )
+        }
+        AgentKind::Codex => {
+            info!(
+                agent = "codex",
+                model = %model,
+                reasoning_effort = %effort,
+                "Resolved Codex launch configuration (ModelChoice)"
+            );
+            let remote = pane_name
+                .map(|n| {
+                    format!(
+                        "--remote {} ",
+                        shell_escape(&format!("unix://codex-devorch-sockets/{}.sock", n))
+                    )
+                })
+                .unwrap_or_default();
+            let cd_arg = if pane_name.is_some() {
+                "--cd \"$workdir\" "
+            } else {
+                ""
+            };
+            let codex_cmd = format!(
+                "codex {}{}--model {} -c 'model_reasoning_effort=\"{}\"' -c shell_environment_policy.inherit=all --dangerously-bypass-approvals-and-sandbox{}",
+                remote, cd_arg, model, effort, suffix
+            );
+            if let Some(name) = pane_name {
+                codex_app_server_wrapper(name, &codex_cmd)
+            } else {
+                codex_cmd
+            }
+        }
+        AgentKind::Gemini => {
+            // gemini CLI (`gemini --help`) has no reasoning-effort/thinking
+            // flag as of this writing; `choice.effort` is carried for menu
+            // shape parity but is not injectable here — omitted.
+            let prompt_arg = init
+                .map(|s| format!(" --prompt-interactive {}", shell_escape(s)))
+                .unwrap_or_default();
+            format!("gemini --model {}{}", model, prompt_arg)
+        }
+        AgentKind::Kimi => {
+            let _ = init;
+            let mcp_cfg = devorch_mcp_config_path();
+            format!(
+                "command env -u TERM_PROGRAM -u ITERM_SESSION_ID -u TERM_PROGRAM_VERSION PATH={}:{}:$PATH kimi --mcp-config-file {} -m {} -y",
+                shell_escape("/opt/homebrew/bin"),
+                shell_escape(&dirs::home_dir().unwrap().join(".local/bin").to_string_lossy()),
+                shell_escape(&mcp_cfg.to_string_lossy()),
+                shell_escape(model)
+            )
+        }
+        AgentKind::Goose => {
+            let _ = init;
+            let provider = crate::delivery::acp::goose_provider_for_agent("claude");
+            let name_arg = pane_name
+                .map(|n| format!(" --name {}", shell_escape(n)))
+                .unwrap_or_default();
+            format!(
+                "env -u TERM_PROGRAM -u ITERM_SESSION_ID -u TERM_PROGRAM_VERSION \
+                 GOOSE_PROVIDER={} GOOSE_MODEL={} GOOSE_DISABLE_KEYRING=1 \
+                 goose session{} --with-extension {}",
+                provider,
+                model,
+                name_arg,
+                shell_escape(&crate::delivery::acp::devorch_extension_value()),
+            )
+        }
+    }
 }
 
 fn codex_app_server_wrapper(pane_name: &str, codex_cmd: &str) -> String {
@@ -982,6 +1086,10 @@ fn get_model_for_role(agent_kind: &str, role: &str) -> String {
             _ => "Gemini 3.5 Flash (Medium)".to_string(),
         },
         "codex" => codex_model_for_role(role).to_string(),
+        "gemini" => match role {
+            "orchestrator" | "ai" | "sec" => "gemini-3.1-pro".to_string(),
+            _ => "gemini-3.5-flash".to_string(),
+        },
         "goose" => crate::delivery::acp::goose_model_for_role("claude", role),
         "kimi" => {
             // Must match a model id in ~/.kimi/config.toml (not the Toad "Default" alias).

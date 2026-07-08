@@ -15,9 +15,8 @@ for the fixed 3-role Executor pattern layout.
 import argparse
 import asyncio
 import json
+import os
 import sys
-import tempfile
-from pathlib import Path
 
 import iterm2
 
@@ -29,17 +28,19 @@ def read_handoff_json(raw: str, required: bool = False) -> dict:
     directory are accepted, so the CLI argument cannot name an arbitrary
     filesystem path.
     """
-    path = Path(raw).resolve()
-    allowed = {Path(tempfile.gettempdir()).resolve(), Path("/tmp").resolve()}
-    if path.parent not in allowed:
+    handoff_root = os.path.realpath("/tmp") + os.sep
+    path = os.path.realpath(raw)
+    if not path.startswith(handoff_root):
         raise SystemExit(f"refusing to read handoff file outside temp dir: {raw}")
-    if not (path.name.startswith("devorch-") and path.name.endswith(".json")):
+    name = os.path.basename(path)
+    if not (name.startswith("devorch-") and name.endswith(".json")):
         raise SystemExit(f"unexpected handoff filename: {raw}")
-    if not path.is_file():
+    if not os.path.isfile(path):
         if required:
             raise SystemExit(f"required handoff file missing: {raw}")
         return {}
-    return json.loads(path.read_text(encoding="utf-8"))
+    with open(path, encoding="utf-8") as fh:
+        return json.load(fh)
 
 
 ROLE_COLORS: dict[str, tuple[int, int, int]] = {

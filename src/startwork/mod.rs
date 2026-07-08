@@ -172,6 +172,9 @@ async fn launch_executor(
     executor_model: patterns::ModelChoice,
     pattern_slug: &str,
 ) -> Result<()> {
+    // Fail fast before any worktree/branch side effects if the layout helper
+    // is missing (e.g. binary updated without reinstalling the scripts).
+    crate::terminal::locate_script("iterm_executor.py")?;
     let repo = find_git_repo()?;
     ensure_squad_services();
     let repo_name = repo
@@ -986,6 +989,9 @@ async fn launch_simple(
     worker_model: &ModelChoice,
     pattern_slug: &str,
 ) -> Result<()> {
+    // Fail fast before any worktree/branch side effects if the layout helper
+    // is missing (e.g. binary updated without reinstalling the scripts).
+    crate::terminal::locate_script("iterm_launch_pattern.py")?;
     let repo = find_git_repo()?;
     ensure_squad_services();
     let repo_name = repo

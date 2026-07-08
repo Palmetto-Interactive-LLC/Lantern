@@ -118,19 +118,36 @@ pub async fn resolve_iterm_session(
     session_id: &str,
     role: &str,
 ) -> Result<Option<String>> {
-    let sid: Option<String> = sqlx::query_scalar(
-        "SELECT t.iterm_session_id \
-         FROM terminal_targets t \
-         JOIN agents a ON a.id = t.agent_id \
-         WHERE a.session_id = ? AND a.role = ? \
-         LIMIT 1",
-    )
-    .bind(session_id)
-    .bind(role)
-    .fetch_optional(pool)
-    .await
-    .context("query terminal_target for (session, role)")?;
-    Ok(sid)
+    for candidate in role_delivery_candidates(role) {
+        let sid: Option<String> = sqlx::query_scalar(
+            "SELECT t.iterm_session_id \
+             FROM terminal_targets t \
+             JOIN agents a ON a.id = t.agent_id \
+             WHERE a.session_id = ? AND a.role = ? \
+             LIMIT 1",
+        )
+        .bind(session_id)
+        .bind(candidate)
+        .fetch_optional(pool)
+        .await
+        .context("query terminal_target for (session, role)")?;
+
+        if sid.is_some() {
+            return Ok(sid);
+        }
+    }
+
+    Ok(None)
+}
+
+fn role_delivery_candidates(role: &str) -> Vec<&str> {
+    match role {
+        "orchestrator" => vec![role, "orch"],
+        "orch" => vec![role, "orchestrator"],
+        "input" => vec![role, "inp"],
+        "inp" => vec![role, "input"],
+        _ => vec![role],
+    }
 }
 
 /// Deliver `text` to the agent for `role`, routing by the TARGET:
@@ -154,5 +171,77 @@ pub async fn deliver_to_role(
     match resolve_iterm_session(pool, session_id, role).await? {
         Some(iterm_session) => inject_text(&iterm_session, text).await,
         None => crate::delivery::acp::deliver_to_role_acp(pool, session_id, role, text).await,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    async fn seed_target(pool: &SqlitePool, session_id: &str, role: &str, iterm_session_id: &str) {
+        sqlx::query(
+            "INSERT OR IGNORE INTO machines (id, created_at) VALUES ('m1', datetime('now'))",
+        )
+        .execute(pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT OR IGNORE INTO sessions \
+             (id, machine_id, project_slug, slot_number, status, created_at) \
+             VALUES (?, 'm1', 'simple', 1, 'active', datetime('now'))",
+        )
+        .bind(session_id)
+        .execute(pool)
+        .await
+        .unwrap();
+
+        let agent_id = format!("agent-{session_id}-{role}");
+        sqlx::query(
+            "INSERT INTO agents \
+             (id, session_id, role, agent_kind, worktree_path, branch, status, created_at) \
+             VALUES (?, ?, ?, 'claude', '/tmp/lantern-test', 'main', 'idle', datetime('now'))",
+        )
+        .bind(&agent_id)
+        .bind(session_id)
+        .bind(role)
+        .execute(pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO terminal_targets \
+             (agent_id, iterm_session_id, pane_id, transport_status, last_seen_at) \
+             VALUES (?, ?, ?, 'ready', datetime('now'))",
+        )
+        .bind(&agent_id)
+        .bind(iterm_session_id)
+        .bind(iterm_session_id)
+        .execute(pool)
+        .await
+        .unwrap();
+    }
+
+    #[tokio::test]
+    async fn resolve_iterm_session_falls_back_to_simple_orch_alias() {
+        let (pool, _dir) = crate::db::test_helpers::create_test_pool().await;
+        seed_target(&pool, "simple-1", "orch", "iterm-orch").await;
+
+        let resolved = resolve_iterm_session(&pool, "simple-1", "orchestrator")
+            .await
+            .unwrap();
+
+        assert_eq!(resolved.as_deref(), Some("iterm-orch"));
+    }
+
+    #[tokio::test]
+    async fn resolve_iterm_session_prefers_exact_role_before_alias() {
+        let (pool, _dir) = crate::db::test_helpers::create_test_pool().await;
+        seed_target(&pool, "simple-1", "orch", "iterm-orch").await;
+        seed_target(&pool, "simple-1", "orchestrator", "iterm-orchestrator").await;
+
+        let resolved = resolve_iterm_session(&pool, "simple-1", "orchestrator")
+            .await
+            .unwrap();
+
+        assert_eq!(resolved.as_deref(), Some("iterm-orchestrator"));
     }
 }

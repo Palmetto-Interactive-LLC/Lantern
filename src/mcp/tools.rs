@@ -1179,15 +1179,39 @@ async fn dispatch_task_inner(pool: &SqlitePool, params: &Value) -> anyhow::Resul
         })
         .unwrap_or_default();
 
-    if !WORKER_ROLES.contains(&to_role) {
-        anyhow::bail!("to_role must be one of: {}", WORKER_ROLES.join(", "));
+    // Validate the target against the session's actual registered agents so
+    // every launch pattern's role names dispatch (team specialists, worker-N,
+    // executor, fixer). Fall back to the legacy team enum only when the
+    // session has no registered agents (unit tests / partial registration).
+    let agents = queries::get_agents_for_session(pool, session)
+        .await
+        .unwrap_or_default();
+    if agents.is_empty() {
+        if !WORKER_ROLES.contains(&to_role) {
+            anyhow::bail!("to_role must be one of: {}", WORKER_ROLES.join(", "));
+        }
+    } else {
+        const NON_DISPATCHABLE: &[&str] = &["orchestrator", "orch", "input", "inp"];
+        let dispatchable: Vec<&str> = agents
+            .iter()
+            .map(|a| a.role.as_str())
+            .filter(|r| !NON_DISPATCHABLE.contains(r))
+            .collect();
+        if !dispatchable.contains(&to_role) {
+            anyhow::bail!(
+                "to_role '{}' is not an agent in session '{}'. Dispatchable roles: {}",
+                to_role,
+                session,
+                dispatchable.join(", ")
+            );
+        }
     }
 
     // Create a leasable work_item so devorch_report_status can resolve the task
     // later. Best-effort: a missing session row (tests) leaves work_item absent,
     // which the report path tolerates.
-    if let Ok(agents) = queries::get_agents_for_session(pool, session).await {
-        if let Some(agent) = agents.into_iter().find(|a| a.role == to_role) {
+    {
+        if let Some(agent) = agents.iter().find(|a| a.role == to_role) {
             let files_json = serde_json::to_string(&files)?;
             let wi_id = generate_id("wi");
             let _ = sqlx::query(

@@ -202,8 +202,7 @@ fn tools_schema() -> Value {
                     "from_role":   { "type": "string", "description": "Your role (should be orchestrator)." },
                     "to_role":     {
                         "type": "string",
-                        "enum": ["ai", "dat", "sec", "ops", "plt", "ui", "doc", "qa"],
-                        "description": "The target worker role."
+                        "description": "The target worker role, as listed in your setup instructions (team specialists like ai/dat/sec, or worker-1..worker-N, executor, fixer)."
                     },
                     "task_id":     { "type": "string", "description": "The task ID (e.g., issue number like 168)." },
                     "summary":     { "type": "string", "description": "A brief summary of the task." },
@@ -224,7 +223,7 @@ fn tools_schema() -> Value {
                     "from_role":        { "type": "string" },
                     "to_role":          {
                         "type": "string",
-                        "enum": ["ai", "dat", "sec", "ops", "plt", "ui", "doc", "qa"]
+                        "description": "The target worker role, as listed in your setup instructions (team specialists, worker-1..worker-N, executor, fixer)."
                     }
                 },
                 "required": ["session", "from_role", "to_role"]

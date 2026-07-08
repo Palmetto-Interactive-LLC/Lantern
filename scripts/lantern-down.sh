@@ -36,6 +36,17 @@ fi
 if [[ "$OS" == "Darwin" ]]; then
     log "INFO: Stopping Temporal via launchd..."
     launchctl remove "$TEMPORAL_LABEL" 2>/dev/null || true
+    # launchctl remove is asynchronous: an immediate `lantern up` re-submitting
+    # the same label races the teardown and its submit gets swallowed (the job
+    # never starts, so up's SERVING wait times out). Wait for the job to
+    # actually disappear before declaring the stop done.
+    for _ in $(seq 1 40); do
+        launchctl list "$TEMPORAL_LABEL" >/dev/null 2>&1 || break
+        sleep 0.25
+    done
+    if launchctl list "$TEMPORAL_LABEL" >/dev/null 2>&1; then
+        log "WARN: Temporal launchd job still present after 10s"
+    fi
     rm -f "$LANTERN_RUN/temporal.pid"
 elif [[ -f "$LANTERN_RUN/temporal.pid" ]]; then
     PID=$(cat "$LANTERN_RUN/temporal.pid")

@@ -104,6 +104,13 @@ else
             exit 1
         fi
         launchctl remove "$TEMPORAL_LABEL" 2>/dev/null || true
+        # Belt-and-braces for the async launchctl remove (see lantern-down):
+        # never submit while the old job is still registered, or the submit
+        # is silently swallowed and Temporal never starts.
+        for _ in $(seq 1 40); do
+            launchctl list "$TEMPORAL_LABEL" >/dev/null 2>&1 || break
+            sleep 0.25
+        done
         launchctl submit \
             -l "$TEMPORAL_LABEL" \
             -o "$LANTERN_LOGS/temporal.log" \

@@ -143,14 +143,14 @@ Targeted single-pane fix: 100% fixer worktree + input router stacked below.
 
 Every pane's environment receives `DEVORCH_PATTERN=<slug>` (`team`, `executor`, `simple`, `fixbug`), enabling agents to self-configure based on squad shape.
 
-### Models Freshness (Planned)
+### Models Freshness
 
-The `models.json` mechanism (not yet fully implemented) will:
-- Cache available models locally at `~/.lantern/data/models.json` with 24-hour freshness
-- Update on `lantern up` and `lantern doctor` (if stale)
-- Manual refresh: `lantern models sync`
-- Weekly GitHub Action manifest to publish model updates
-- Selector will fall back to hardcoded defaults if the cache is unavailable
+The `models.json` manifest at the repo root is canon; `src/models_registry.rs` keeps installs current:
+- Cached locally at `~/.lantern/data/models_cache.json` with 24-hour freshness
+- Non-blocking freshness check on `lantern up` and `lantern doctor` (never fails offline)
+- Manual refresh: `lantern models sync` (or `--sync`); `lantern models` shows compiled-in vs cached
+- Weekly GitHub Action (`models-manifest.yml`) scrapes public model docs and PRs manifest updates
+- Menus prefer the cached manifest and fall back to the compiled-in table
 
 ## Key Commands
 

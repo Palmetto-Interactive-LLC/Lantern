@@ -888,6 +888,21 @@ pub async fn handle_get_setup_instructions(
     }
     let parsed: Args = serde_json::from_value(args)?;
 
+    // Pattern-aware instructions: non-team `LaunchPattern`s (see
+    // `startwork::patterns::LaunchPattern`) get their own prompt content from
+    // `crate::prompts`, keyed off `DEVORCH_PATTERN` (exported to every pane by
+    // `startwork::launch`). Team stays on the inline prompts below, unchanged.
+    if let Some("simple") = std::env::var("DEVORCH_PATTERN").ok().as_deref() {
+        return Ok(json!({
+            "status": "ok",
+            "instructions": crate::prompts::simple::instructions(
+                &parsed.role,
+                &parsed.agent,
+                &parsed.session,
+            )
+        }));
+    }
+
     let instructions = if parsed.role == "orchestrator" {
         format!(
             "You are the orchestrator for session {} (agent: {}).\n\

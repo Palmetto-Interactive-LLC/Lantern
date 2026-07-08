@@ -2,17 +2,26 @@
 """
 iterm_launch.py — Create the squad window layout in iTerm2.
 
-Layout (9 panes in 1 tab, 1 new window):
-  [ORCH (33% width, full height)] | [AI  | SEC ]
-                                  | [DAT | OPS ]
-                                  | [PLT | UI  ]
-                                  | [DOC | QA  ]
+Generic layout engine: builds any pane grid described by a `LayoutSpec`
+(columns of weighted width, each holding rows of role names split evenly
+top-to-bottom). Handles 2..=12 panes. The legacy 4x2+1 team grid (9 panes,
+1 tab) is just one `LayoutSpec` shape among several — see
+`src/startwork/patterns.rs` for the shapes each launch pattern produces:
+
+  team    : [ORCH/INPUT 33%] | [AI/DAT/PLT/DOC 33%] | [SEC/OPS/UI/QA 34%]
+  executor: [EXECUTOR/INPUT 70%] | [ADVISOR 30%]
+  simple  : [ORCH/INPUT 33%] | [worker columns...]
+  fixbug  : [FIXER/INPUT 100%]
 
 Writes to stdout (JSON):
   { "orchestrator": "session_id", "ai": "session_id", ... }
 
-Optional --startup-file JSON map role → shell command; injected on the same
-Python API connection after panes exist (reliable vs separate inject processes).
+Optional --startup-file JSON: {"commands": {role: shell command}, "layout":
+{"columns": [{"weight": int, "rows": [role, ...]}, ...]}}. Commands are
+injected on the same Python API connection after panes exist (reliable vs
+separate inject processes). If omitted, falls back to the legacy team
+layout so the script still works when invoked without one (e.g. manual
+debugging).
 """
 
 import argparse
@@ -52,6 +61,16 @@ ROLE_LABELS: dict[str, str] = {
     "qa": "QA",
     "input": "INPUT",
     "inp": "INPUT",
+}
+
+# Fallback layout used only when no --startup-file (or a file with no
+# "layout" key) is supplied — matches the legacy 4x2+1 team grid exactly.
+DEFAULT_LAYOUT: dict = {
+    "columns": [
+        {"weight": 33, "rows": ["orch", "inp"]},
+        {"weight": 33, "rows": ["ai", "dat", "plt", "doc"]},
+        {"weight": 34, "rows": ["sec", "ops", "ui", "qa"]},
+    ]
 }
 
 
@@ -122,9 +141,54 @@ async def hide_window_toolbelt(window: iterm2.Window) -> None:
         return  # toolbelt hide is best-effort; not all iTerm2 versions expose this API
 
 
+async def build_layout_panes(
+    root: iterm2.Session, layout: dict
+) -> dict[str, iterm2.Session]:
+    """Walk a `LayoutSpec` ({"columns": [{"weight", "rows": [role, ...]}]})
+    and split `root` into that exact grid: columns are split off left-to-right
+    first, then each column's rows are split evenly top-to-bottom. Returns a
+    role → session map. Works for any column/row count (2..=12 panes total),
+    and reproduces the legacy hardcoded team split order/geometry exactly
+    when given `DEFAULT_LAYOUT`.
+    """
+    columns: list[dict] = layout["columns"]
+    if not columns:
+        raise RuntimeError("layout has no columns")
+
+    # Split off columns left-to-right, peeling the remainder off the
+    # rightmost pane each time so column N ends up to the right of N-1.
+    col_sessions: list[iterm2.Session] = []
+    current = root
+    for _ in range(len(columns) - 1):
+        nxt = await current.async_split_pane(vertical=True)
+        col_sessions.append(current)
+        current = nxt
+    col_sessions.append(current)
+
+    # Split each column into its rows, evenly, top-to-bottom.
+    role_to_session: dict[str, iterm2.Session] = {}
+    for col_spec, col_session in zip(columns, col_sessions):
+        rows: list[str] = col_spec["rows"]
+        if not rows:
+            continue
+        row_sessions: list[iterm2.Session] = []
+        cur = col_session
+        for _ in range(len(rows) - 1):
+            nxt = await cur.async_split_pane(vertical=False)
+            row_sessions.append(cur)
+            cur = nxt
+        row_sessions.append(cur)
+        for role, session in zip(rows, row_sessions):
+            role_to_session[role] = session
+
+    return role_to_session
+
+
 async def apply_layout_sizes(
-    window: iterm2.Window, tab: iterm2.Tab, orch: iterm2.Session, input_session: iterm2.Session
+    window: iterm2.Window, tab: iterm2.Tab, layout: dict, role_to_session: dict[str, iterm2.Session]
 ) -> None:
+    """Size each pane from `layout`'s column weights (left-to-right) and an
+    even top-to-bottom split of each column's row count."""
     try:
         frame = await window.async_get_frame()
     except Exception:
@@ -132,16 +196,18 @@ async def apply_layout_sizes(
 
     total_w = max(frame.size.width, 120)
     total_h = max(frame.size.height, 24)
-    orch_w = max(int(total_w * 0.33), 40)
-    worker_w = max(total_w - orch_w, 40)
-    row_h = max(total_h // 4, 6)
+    columns: list[dict] = layout["columns"]
+    total_weight = sum(c.get("weight", 0) for c in columns) or 1
 
-    orch.preferred_size = iterm2.util.Size(orch_w, int(total_h * 0.66))
-    input_session.preferred_size = iterm2.util.Size(orch_w, int(total_h * 0.33))
-    for session in tab.sessions:
-        if session.session_id in (orch.session_id, input_session.session_id):
-            continue
-        session.preferred_size = iterm2.util.Size(worker_w // 2, row_h)
+    for col_spec in columns:
+        col_w = max(int(total_w * col_spec.get("weight", 0) / total_weight), 40)
+        rows: list[str] = col_spec["rows"]
+        row_h = max(total_h // max(len(rows), 1), 6)
+        for role in rows:
+            session = role_to_session.get(role)
+            if session is None:
+                continue
+            session.preferred_size = iterm2.util.Size(col_w, row_h)
 
     try:
         await tab.async_update_layout()
@@ -184,7 +250,7 @@ async def inject_startup_commands(
     titles_by_role: dict[str, str],
     startup_by_role: dict[str, str],
 ) -> None:
-    """Launch all 9 panes concurrently — one coroutine per worker channel."""
+    """Launch all panes concurrently — one coroutine per channel."""
     await asyncio.sleep(0.15)
     app = await iterm2.async_get_app(connection)
     tasks = []
@@ -207,6 +273,7 @@ async def main(
     session_id: str,
     titles_by_role: dict[str, str],
     startup_by_role: dict[str, str],
+    layout: dict,
 ) -> None:
     await iterm2.async_get_app(connection)
     await configure_iterm_for_squads(connection)
@@ -227,38 +294,11 @@ async def main(
     tab = resolve_tab(window)
     await tab.async_activate()
     await hide_window_toolbelt(window)
-    orch_session = resolve_session(tab)
+    root_session = resolve_session(tab)
 
-    # Split vertically to create the 3 columns first
-    right = await orch_session.async_split_pane(vertical=True)
-    right2 = await right.async_split_pane(vertical=True)
+    role_to_session = await build_layout_panes(root_session, layout)
 
-    # Now split the Orchestrator pane horizontally to put the Input router directly under it
-    input_session = await orch_session.async_split_pane(vertical=False)
-
-    # Split the worker columns horizontally into rows
-    r1c2 = await right.async_split_pane(vertical=False)
-    r1c3 = await r1c2.async_split_pane(vertical=False)
-    r1c4 = await r1c3.async_split_pane(vertical=False)
-
-    r2c2 = await right2.async_split_pane(vertical=False)
-    r2c3 = await r2c2.async_split_pane(vertical=False)
-    r2c4 = await r2c3.async_split_pane(vertical=False)
-
-    role_to_session: dict[str, iterm2.Session] = {
-        "orchestrator": orch_session,
-        "input": input_session,
-        "ai": right,
-        "dat": r1c2,
-        "plt": r1c3,
-        "doc": r1c4,
-        "sec": right2,
-        "ops": r2c2,
-        "ui": r2c3,
-        "qa": r2c4,
-    }
-
-    await apply_layout_sizes(window, tab, orch_session, input_session)
+    await apply_layout_sizes(window, tab, layout, role_to_session)
 
     result: dict[str, str] = {}
     appearance_tasks = []
@@ -277,7 +317,7 @@ async def main(
             startup_by_role,
         )
 
-    await orch_session.async_activate()
+    await root_session.async_activate()
     print(json.dumps(result))
 
 
@@ -286,7 +326,7 @@ if __name__ == "__main__":
     parser.add_argument("--session", required=True, help="Devorch session ID (e.g. m7-navi-40)")
     parser.add_argument(
         "--startup-file",
-        help="JSON file mapping role → shell startup command",
+        help="JSON file: {\"commands\": {role: shell command}, \"layout\": LayoutSpec}",
     )
     parser.add_argument(
         "--titles-file",
@@ -295,10 +335,13 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     startup_by_role: dict[str, str] = {}
+    layout: dict = DEFAULT_LAYOUT
     if args.startup_file:
         path = Path(args.startup_file)
         if path.is_file():
-            startup_by_role = json.loads(path.read_text(encoding="utf-8"))
+            payload = json.loads(path.read_text(encoding="utf-8"))
+            startup_by_role = payload.get("commands", {})
+            layout = payload.get("layout") or DEFAULT_LAYOUT
 
     titles_by_role: dict[str, str] = {}
     if args.titles_file:
@@ -307,5 +350,5 @@ if __name__ == "__main__":
             titles_by_role = json.loads(path.read_text(encoding="utf-8"))
 
     iterm2.run_until_complete(
-        lambda conn: main(conn, args.session, titles_by_role, startup_by_role)
+        lambda conn: main(conn, args.session, titles_by_role, startup_by_role, layout)
     )

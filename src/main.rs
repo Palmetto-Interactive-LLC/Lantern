@@ -5,6 +5,7 @@ mod delivery;
 mod doctor_state;
 mod human;
 mod mcp;
+mod models_registry;
 mod recovery;
 mod startwork;
 mod stopwork;
@@ -48,6 +49,12 @@ enum Commands {
     },
     /// Show status of all squads and agents
     Status,
+    /// Show the self-updating model registry (compiled-in vs. cached manifest)
+    Models {
+        /// Fetch models.json from GitHub and write it to the local cache
+        #[arg(long)]
+        sync: bool,
+    },
     /// Tail logs for a service
     Logs {
         /// Service name: relay, temporal
@@ -165,6 +172,7 @@ async fn main() -> anyhow::Result<()> {
         Commands::Doctor => commands::doctor().await,
         Commands::DoctorState { fix } => commands::doctor_state(fix).await,
         Commands::Status => commands::status().await,
+        Commands::Models { sync } => commands::models(sync).await,
         Commands::Logs { service } => commands::logs(&service).await,
         Commands::Relay { machine } => commands::relay(&machine).await,
         Commands::Pause { agent } => commands::pause(&agent).await,
@@ -288,6 +296,7 @@ mod commands {
     pub async fn up() -> anyhow::Result<()> {
         info!("Starting Lantern services...");
         run_script("lantern-up")?;
+        models_registry::spawn_freshness_check();
         Ok(())
     }
 
@@ -305,7 +314,16 @@ mod commands {
     pub async fn doctor() -> anyhow::Result<()> {
         info!("Running Lantern doctor...");
         run_script("lantern-doctor")?;
+        models_registry::spawn_freshness_check();
         Ok(())
+    }
+
+    pub async fn models(sync: bool) -> anyhow::Result<()> {
+        if sync {
+            models_registry::sync().await
+        } else {
+            models_registry::print_status().await
+        }
     }
 
     pub async fn doctor_state(fix: Option<DoctorStateFix>) -> anyhow::Result<()> {

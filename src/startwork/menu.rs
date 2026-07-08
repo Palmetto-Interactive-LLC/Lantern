@@ -98,32 +98,64 @@ fn menu_labels(menu: &[ModelChoice]) -> String {
         .join(", ")
 }
 
-fn resolve_interactive() -> Result<PatternConfig> {
-    let pattern_options = vec![
-        "1. Team Orchestrator",
-        "2. Executor",
-        "3. Simple Orchestrator",
-        "4. Fix a Bug",
-    ];
-    let choice = Select::new("Select a launch pattern:", pattern_options)
-        .prompt()
-        .context("pattern selection cancelled")?;
+const BOLD: &str = "\x1b[1m";
+const DIM: &str = "\x1b[2m";
+const RESET: &str = "\x1b[0m";
 
-    match choice {
-        "1. Team Orchestrator" => {
-            let agent_options = vec!["Claude", "Codex", "Gemini"];
-            let agent_choice = Select::new("Select agent:", agent_options)
-                .prompt()
-                .context("agent selection cancelled")?;
-            let agent = AgentKind::parse(agent_choice).unwrap_or(AgentKind::Claude);
+/// Bold name + dim description, the shared look of every startwork menu row.
+fn menu_row(name: &str, desc: &str) -> String {
+    format!("{BOLD}{name}{RESET}  {DIM}{desc}{RESET}")
+}
+
+/// Present a styled `Select` and return the chosen index (options are
+/// ANSI-styled strings, so selection is by index, not by string match).
+fn select_index(prompt: &str, rows: Vec<String>) -> Result<usize> {
+    Ok(Select::new(prompt, rows)
+        .raw_prompt()
+        .with_context(|| format!("'{prompt}' selection cancelled"))?
+        .index)
+}
+
+fn resolve_interactive() -> Result<PatternConfig> {
+    let pattern_rows = vec![
+        menu_row(
+            "Team Orchestrator",
+            "1 orchestrator + 8 specialist workers — the full 10-pane grid",
+        ),
+        menu_row(
+            "Executor",
+            "one executor pane guided by a quiet Fable 5 advisor",
+        ),
+        menu_row(
+            "Simple Orchestrator",
+            "you drive the orchestrator; it delegates to 1-10 identical workers",
+        ),
+        menu_row(
+            "Fix a Bug",
+            "one maintainer agent takes an issue through PR, CI, and review to merge",
+        ),
+    ];
+
+    match select_index("Launch pattern:", pattern_rows)? {
+        0 => {
+            let agent_rows = vec![
+                menu_row("Claude", "Claude Code CLI"),
+                menu_row("Codex", "OpenAI Codex CLI"),
+                menu_row("Gemini", "Antigravity (agy) CLI"),
+            ];
+            let agent = match select_index("Agent:", agent_rows)? {
+                1 => AgentKind::Codex,
+                2 => AgentKind::Gemini,
+                _ => AgentKind::Claude,
+            };
             Ok(PatternConfig::team(agent))
         }
-        "2. Executor" => {
-            let model = select_model("Select executor model:", executor_model_menu())?;
+        1 => {
+            let model = select_model("Executor model:", executor_model_menu())?;
             Ok(PatternConfig::executor(model))
         }
-        "3. Simple Orchestrator" => {
-            let orch = select_model("Select orchestrator model:", orchestrator_model_menu())?;
+        2 => {
+            let orch = select_model("Orchestrator model:", orchestrator_model_menu())?;
             let workers = CustomType::<u8>::new("Number of workers (1-10):")
                 .with_default(4)
                 .with_validator(|v: &u8| {
@@ -137,27 +169,36 @@ fn resolve_interactive() -> Result<PatternConfig> {
                 })
                 .prompt()
                 .context("worker count prompt cancelled")?;
-            let worker_model = select_model("Select worker model:", executor_model_menu())?;
+            let worker_model = select_model("Worker model:", executor_model_menu())?;
             Ok(PatternConfig::simple(orch, workers, worker_model))
         }
-        "4. Fix a Bug" => {
+        3 => {
             let issue = Text::new("Issue reference:")
+                .with_help_message("GitHub issue number/URL, or a beads id (e.g. lan-abc)")
                 .prompt()
                 .context("issue prompt cancelled")?;
-            let fixer = select_model("Select fixer model:", executor_model_menu())?;
+            let fixer = select_model("Fixer model:", executor_model_menu())?;
             Ok(PatternConfig::fixbug(issue, fixer))
         }
-        other => bail!("unexpected pattern menu selection '{other}'"),
+        other => bail!("unexpected pattern menu selection index {other}"),
     }
 }
 
 fn select_model(prompt: &str, menu: Vec<ModelChoice>) -> Result<ModelChoice> {
-    let labels: Vec<String> = menu.iter().map(|m| m.label.clone()).collect();
-    let choice = Select::new(prompt, labels)
-        .prompt()
-        .context("model selection cancelled")?;
+    let rows: Vec<String> = menu
+        .iter()
+        .enumerate()
+        .map(|(i, m)| {
+            let default_tag = if i == 0 { "  (default)" } else { "" };
+            menu_row(
+                &m.label,
+                &format!("{} @ {}{}", m.model_id, m.effort, default_tag),
+            )
+        })
+        .collect();
+    let idx = select_index(prompt, rows)?;
     menu.into_iter()
-        .find(|m| m.label == choice)
+        .nth(idx)
         .context("selected model not found in menu")
 }
 

@@ -314,6 +314,9 @@ pub async fn launch(
     issue: String,
     fixer: ModelChoice,
 ) -> Result<()> {
+    // Fail fast before any worktree/branch side effects if the layout helper
+    // is missing (e.g. binary updated without reinstalling the scripts).
+    crate::terminal::locate_script("iterm_launch_pattern.py")?;
     let repo = super::find_git_repo()?;
     super::ensure_squad_services();
     let repo_name = repo

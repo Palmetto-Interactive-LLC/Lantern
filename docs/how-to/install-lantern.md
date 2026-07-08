@@ -2,17 +2,19 @@
 
 Install Lantern and its local dependencies on a new machine.
 
-## Automated Install
+## Recommended Install
 
-From the repository root:
+Install the latest Lantern release:
 
 ```bash
-git clone https://github.com/Palmetto-Interactive-LLC/Lantern.git
-cd Lantern
-./scripts/install.sh
+curl -fsSL https://raw.githubusercontent.com/Palmetto-Interactive-LLC/Lantern/main/scripts/install.sh | sh
 ```
 
-Or, if `lantern` is already on PATH:
+The installer detects your Mac architecture, downloads the matching GitHub
+Release archive, verifies `SHA256SUMS` when available, and installs Lantern to
+`~/.lantern/bin`.
+
+If `lantern` is already on PATH, you can reinstall with:
 
 ```bash
 lantern install
@@ -33,24 +35,40 @@ lantern doctor
 
 ## What the Installer Does
 
-1. Creates `~/.lantern/` directory structure.
-2. Installs Rust via rustup if missing.
-3. Builds `lantern` with `cargo build --release` when run from a source checkout, or downloads the latest release binary when piped from GitHub.
-4. Copies helper commands to `~/.lantern/bin/` (`lantern-up`, `lantern-down`, `lantern-doctor`, `lantern-install`, `lantern-setup-iterm`, `startwork`, `stopwork`).
-5. Installs iTerm2 helper scripts on macOS.
-6. Writes the launchd plist for `com.lantern.relay`.
-7. Writes `~/.lantern/config/lantern.toml`.
-8. Adds `~/.lantern/bin` to PATH in `~/.zshrc`.
+1. Creates the `~/.lantern/` directory structure.
+2. Downloads the latest GitHub Release archive for your architecture, or builds from source when run from a checkout.
+3. Verifies downloaded release archives against `SHA256SUMS` when the checksum file is present.
+4. Installs `lantern`, service helpers, wrapper commands, and iTerm2 helper scripts to `~/.lantern/bin`.
+5. Writes the launchd plist for `com.lantern.relay`.
+6. Writes `~/.lantern/config/lantern.toml`.
+7. Adds `~/.lantern/bin` to PATH in `~/.zshrc` or `~/.bashrc` when those files exist.
+8. Ad-hoc codesigns the installed binary on macOS when `codesign` is available.
 
-When you run `lantern up` on macOS, Lantern also submits the Temporal dev server to launchd as `com.lantern.temporal`.
+When run from a source checkout, `scripts/install.sh` builds from source instead
+of downloading a release. Set `LANTERN_FORCE_DOWNLOAD=1` to force release
+download behavior from a checkout.
+
+When you run `lantern up` on macOS, Lantern submits the Temporal dev server to
+launchd as `com.lantern.temporal`.
 
 For directory layout and config defaults, see [Paths and environment](../reference/paths-and-environment.md).
 
-## Manual Install
+## Release Kit
 
-If you prefer not to run the full installer:
+Each GitHub Release publishes:
+
+- `install-lantern.sh` - a copy of the installer script for distribution.
+- `lantern-vYYYY.M.PATCH-aarch64-apple-darwin.tar.gz` - Apple Silicon archive.
+- `lantern-vYYYY.M.PATCH-x86_64-apple-darwin.tar.gz` - Intel Mac archive.
+- `SHA256SUMS` - checksums for release assets.
+
+## Manual Source Install
+
+If you prefer to build from source:
 
 ```bash
+git clone https://github.com/Palmetto-Interactive-LLC/Lantern.git
+cd Lantern
 cargo build --release
 mkdir -p ~/.lantern/bin
 cp target/release/lantern ~/.lantern/bin/

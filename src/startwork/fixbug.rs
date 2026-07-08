@@ -192,10 +192,12 @@ fn build_fixer_command(model: &ModelChoice, init: &str, pane_name: &str) -> Stri
             super::codex_app_server_wrapper(pane_name, &codex_cmd)
         }
         AgentKind::Gemini => {
+            // Antigravity (`agy`) launch, selected by display name — same
+            // convention as the other Gemini launch arms.
             format!(
-                "gemini --model {} --yolo{}",
-                super::shell_escape(&model.model_id),
-                suffix
+                "env -u TERM_PROGRAM -u ITERM_SESSION_ID -u TERM_PROGRAM_VERSION ANTIGRAVITY_MODEL={} agy --dangerously-skip-permissions --prompt-interactive {}",
+                super::shell_escape(model.antigravity_model()),
+                super::shell_escape(init)
             )
         }
         // Claude (and any other fallback) — same shape as the legacy grid's

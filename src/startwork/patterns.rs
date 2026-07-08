@@ -27,20 +27,22 @@ impl AgentKind {
         match self {
             AgentKind::Claude => "claude",
             AgentKind::Codex => "codex",
-            AgentKind::Gemini => "gemini",
+            // Gemini-family models launch through the Antigravity CLI; "agy"
+            // is the agent-kind string every downstream launch path expects.
+            AgentKind::Gemini => "agy",
             AgentKind::Kimi => "kimi",
             AgentKind::Goose => "goose",
         }
     }
 
     /// Parse a CLI-facing agent token (`--agent`, trailing positional, or a
-    /// menu selection) into an `AgentKind`. Case-insensitive. Returns `None`
-    /// for tokens with no `AgentKind` equivalent (e.g. legacy `agy`).
+    /// menu selection) into an `AgentKind`. Case-insensitive. `gemini`,
+    /// `agy`, and `agi` all mean the Antigravity-launched Gemini family.
     pub fn parse(s: &str) -> Option<Self> {
         match s.to_ascii_lowercase().as_str() {
             "claude" => Some(AgentKind::Claude),
             "codex" => Some(AgentKind::Codex),
-            "gemini" => Some(AgentKind::Gemini),
+            "gemini" | "agy" | "agi" => Some(AgentKind::Gemini),
             "kimi" => Some(AgentKind::Kimi),
             "goose" => Some(AgentKind::Goose),
             _ => None,
@@ -66,6 +68,13 @@ impl ModelChoice {
             effort: effort.to_string(),
             label: label.to_string(),
         }
+    }
+
+    /// Antigravity (`agy`) selects models by display name (e.g. "Gemini 3.1
+    /// Pro (High)"), not by dotted model id — mirror the naming convention
+    /// the team grid's agy launch arm already uses for `ANTIGRAVITY_MODEL`.
+    pub fn antigravity_model(&self) -> &str {
+        &self.label
     }
 }
 

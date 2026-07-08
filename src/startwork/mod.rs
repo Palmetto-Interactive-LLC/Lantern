@@ -73,7 +73,7 @@ pub fn parse_startwork_args(
             let last_lower = last.to_ascii_lowercase();
             if KNOWN_AGENT_KINDS.contains(&last_lower.as_str()) {
                 let mut a = positionals.pop().unwrap();
-                if a.eq_ignore_ascii_case("agi") {
+                if a.eq_ignore_ascii_case("agi") || a.eq_ignore_ascii_case("gemini") {
                     a = "agy".to_string();
                 }
                 agent = Some(a);
@@ -550,11 +550,20 @@ fn build_model_agent_command(
                 codex_cmd
             }
         }
-        // Gemini launch flags are not yet verified against the live CLI in this
-        // pattern; falls back to a best-effort invocation. TODO(patterns): wire
-        // up the real `gemini` CLI flags once verified (tracked for whichever
-        // agent owns the Gemini menu path).
-        patterns::AgentKind::Gemini | patterns::AgentKind::Kimi | patterns::AgentKind::Goose => {
+        patterns::AgentKind::Gemini => {
+            // Gemini-family models launch through the Antigravity CLI (`agy`),
+            // selected by display name via ANTIGRAVITY_MODEL — same convention
+            // as `build_agent_command`'s "agy" arm.
+            let prompt_arg = init
+                .map(|s| format!(" --prompt-interactive {}", shell_escape(s)))
+                .unwrap_or_default();
+            format!(
+                "env -u TERM_PROGRAM -u ITERM_SESSION_ID -u TERM_PROGRAM_VERSION ANTIGRAVITY_MODEL={} agy --dangerously-skip-permissions{}",
+                shell_escape(model.antigravity_model()),
+                prompt_arg
+            )
+        }
+        patterns::AgentKind::Kimi | patterns::AgentKind::Goose => {
             format!(
                 "claude --model {} --dangerously-skip-permissions{}",
                 model.model_id, suffix
@@ -1318,16 +1327,16 @@ fn build_pattern_agent_command(
             }
         }
         AgentKind::Gemini => {
-            // No standalone `gemini` CLI wiring exists in this codebase today —
-            // Gemini-family models ride the Antigravity (`agy`) CLI via
-            // ANTIGRAVITY_MODEL, matching the only other Gemini launch path
-            // (`build_agent_command`'s "agy" arm).
+            // Gemini-family models ride the Antigravity (`agy`) CLI, which
+            // selects models by display name via ANTIGRAVITY_MODEL, matching
+            // `build_agent_command`'s "agy" arm.
             let prompt_arg = init
                 .map(|s| format!(" --prompt-interactive {}", shell_escape(s)))
                 .unwrap_or_default();
             format!(
                 "env -u TERM_PROGRAM -u ITERM_SESSION_ID -u TERM_PROGRAM_VERSION ANTIGRAVITY_MODEL={} agy --dangerously-skip-permissions{}",
-                shell_escape(&model.model_id), prompt_arg
+                shell_escape(model.antigravity_model()),
+                prompt_arg
             )
         }
         AgentKind::Kimi => {
@@ -1922,16 +1931,6 @@ fn build_agent_command(
                 shell_escape(&crate::delivery::acp::devorch_extension_value()),
             )
         }
-        "gemini" => {
-            // gemini CLI (`gemini --help`) has no reasoning-effort/thinking
-            // flag as of this writing; `-i/--prompt-interactive` runs the
-            // init prompt then continues interactively, mirroring how the
-            // other TUIs get their init message.
-            let prompt_arg = init
-                .map(|s| format!(" --prompt-interactive {}", shell_escape(s)))
-                .unwrap_or_default();
-            format!("gemini --model {}{}", model, prompt_arg)
-        }
         _ => {
             format!(
                 "claude --model {} --dangerously-skip-permissions{}",
@@ -2000,10 +1999,6 @@ fn get_model_for_role(agent_kind: &str, role: &str) -> String {
             _ => "Gemini 3.5 Flash (Medium)".to_string(),
         },
         "codex" => codex_model_for_role(role).to_string(),
-        "gemini" => match role {
-            "orchestrator" | "ai" | "sec" => "gemini-3.1-pro".to_string(),
-            _ => "gemini-3.5-flash".to_string(),
-        },
         "goose" => crate::delivery::acp::goose_model_for_role("claude", role),
         "kimi" => {
             // Must match a model id in ~/.kimi/config.toml (not the Toad "Default" alias).

@@ -20,8 +20,13 @@ use tracing::{info, warn};
 use crate::db::queries;
 use crate::types::{generate_id, Agent, Session, TerminalTarget};
 
+pub mod menu;
+pub mod patterns;
+
+use patterns::PatternConfig;
+
 /// Teams in the squad grid (4×2 + 1 qa).
-const GRID_ORDER: &[&str] = &[
+pub(crate) const GRID_ORDER: &[&str] = &[
     "orch", "ai", "dat", "sec", "ops", "plt", "ui", "doc", "qa", "inp",
 ];
 
@@ -37,7 +42,7 @@ const CODEX_LAUNCH_ERROR_WINDOW: Duration = Duration::from_secs(5);
 const DEVORCH_DEFAULT_TASK_QUEUE: &str = "lantern-devorch";
 
 /// Team labels for pane titles.
-const TEAM_LABELS: &[(&str, &str)] = &[
+pub(crate) const TEAM_LABELS: &[(&str, &str)] = &[
     ("orch", "ORCH"),
     ("ai", "AI"),
     ("dat", "DAT"),
@@ -95,7 +100,7 @@ pub fn parse_startwork_args(
 }
 
 /// Team colors (RGB) for pane backgrounds.
-const TEAM_COLORS: &[(&str, [u8; 3])] = &[
+pub(crate) const TEAM_COLORS: &[(&str, [u8; 3])] = &[
     ("orch", [30, 32, 35]),
     ("ai", [62, 49, 0]),
     ("dat", [45, 27, 83]),
@@ -108,12 +113,55 @@ const TEAM_COLORS: &[(&str, [u8; 3])] = &[
     ("inp", [45, 45, 45]),
 ];
 
-/// Launch a new squad workspace.
+/// Launch a new squad workspace for the given `PatternConfig`.
+///
+/// `team_agent_override`, when set, wins over `pattern_config`'s own
+/// `TeamOrchestrator { agent }` for the actual agent CLI invoked — this lets
+/// legacy agent kinds with no `AgentKind` equivalent (e.g. `agy`/Antigravity,
+/// still accepted by `parse_startwork_args`) keep working byte-for-byte via
+/// the raw `--agent`/trailing-positional string, while `pattern_config`
+/// still carries a representable `AgentKind` for menus/metadata/env.
 pub async fn launch(
+    name: Option<&str>,
+    number: Option<u32>,
+    no_init: bool,
+    pattern_config: PatternConfig,
+    team_agent_override: Option<&str>,
+) -> Result<()> {
+    let pattern_slug = pattern_config.pattern_slug();
+    match &pattern_config.pattern {
+        patterns::LaunchPattern::TeamOrchestrator { agent } => {
+            let agent_str = team_agent_override.unwrap_or_else(|| agent.as_str());
+            launch_team(name, number, Some(agent_str), no_init, pattern_slug).await
+        }
+        patterns::LaunchPattern::Executor { .. } => {
+            anyhow::bail!(
+                "--pattern executor is not implemented yet in this build (Phase 1 foundation only)"
+            )
+        }
+        patterns::LaunchPattern::SimpleOrchestrator { .. } => {
+            anyhow::bail!(
+                "--pattern simple is not implemented yet in this build (Phase 1 foundation only)"
+            )
+        }
+        patterns::LaunchPattern::FixABug { .. } => {
+            anyhow::bail!(
+                "--pattern fixbug is not implemented yet in this build (Phase 1 foundation only)"
+            )
+        }
+    }
+}
+
+/// Launch a new squad workspace using the legacy 4x2+1 team grid.
+///
+/// This is byte-identical to the pre-pattern `startwork` behavior; `launch()`
+/// above dispatches into it for `LaunchPattern::TeamOrchestrator`.
+async fn launch_team(
     name: Option<&str>,
     number: Option<u32>,
     agent_kind: Option<&str>,
     no_init: bool,
+    pattern_slug: &str,
 ) -> Result<()> {
     let repo = find_git_repo()?;
     ensure_squad_services();
@@ -157,6 +205,7 @@ pub async fn launch(
             &worktree_root,
             &config,
             &db_pool,
+            pattern_slug,
         )
         .await;
     }
@@ -332,6 +381,7 @@ finally:
         &session_id,
         &run_id,
         &runtime_identity,
+        pattern_slug,
     );
 
     // Skills + MCP: sync all roots concurrently (blocking I/O off the async runtime).
@@ -410,6 +460,7 @@ finally:
         slot_number: number as i64,
         status: "active".to_string(),
         created_at: chrono::Utc::now(),
+        pattern: pattern_slug.to_string(),
     };
     queries::insert_session(&db_pool, &session).await?;
 
@@ -453,6 +504,7 @@ finally:
 ///   repo's no-secrets model).
 /// - beads is available via the shell. `stopwork` closes the window and removes
 ///   the worktree/branch.
+#[allow(clippy::too_many_arguments)]
 async fn launch_solo_goose(
     repo: &Path,
     name: &str,
@@ -461,6 +513,7 @@ async fn launch_solo_goose(
     worktree_root: &Path,
     config: &crate::config::Config,
     db_pool: &sqlx::SqlitePool,
+    pattern_slug: &str,
 ) -> Result<()> {
     let _ = ensure_antigravity_project_trusted(repo);
     let _ = ensure_gemini_project_trusted(repo);
@@ -489,6 +542,7 @@ async fn launch_solo_goose(
         slot_number: number as i64,
         status: "active".to_string(),
         created_at: chrono::Utc::now(),
+        pattern: pattern_slug.to_string(),
     };
     queries::insert_session(db_pool, &session).await?;
     let agent = Agent {
@@ -607,6 +661,7 @@ fn base_window_env(
     role: &str,
     name: &str,
     number: u32,
+    pattern_slug: &str,
 ) -> std::collections::HashMap<String, String> {
     let mut env = std::collections::HashMap::new();
     env.insert("DEVORCH_SESSION".to_string(), workspace_session.to_string());
@@ -614,6 +669,7 @@ fn base_window_env(
     env.insert("DEVORCH_ROLE".to_string(), role.to_string());
     env.insert("DEVORCH_PROJECT_SLUG".to_string(), name.to_string());
     env.insert("DEVORCH_SLOT".to_string(), number.to_string());
+    env.insert("DEVORCH_PATTERN".to_string(), pattern_slug.to_string());
     // Local self-contained backend — no remote Temporal or remote DB.
     env.insert(
         "DEVORCH_TEMPORAL_ADDRESS".to_string(),
@@ -649,6 +705,7 @@ fn build_window_defs(
     workspace_session: &str,
     run_id: &str,
     runtime_identity: &RuntimeIdentityEnv,
+    pattern_slug: &str,
 ) -> Vec<WindowDef> {
     let mut defs = Vec::new();
     for grid_team in GRID_ORDER {
@@ -670,6 +727,7 @@ fn build_window_defs(
                 role,
                 name,
                 number,
+                pattern_slug,
             );
             defs.push(WindowDef {
                 name: workspace_session.to_string(),
@@ -694,6 +752,7 @@ fn build_window_defs(
                 role,
                 name,
                 number,
+                pattern_slug,
             );
             let (r, g, b) = team_color(grid_team);
             let input_cmd = format!("python3 /tmp/devorch-input-router-{}.py", workspace_session);
@@ -726,6 +785,7 @@ fn build_window_defs(
                 role,
                 name,
                 number,
+                pattern_slug,
             );
             let (r, g, b) = team_color(grid_team);
             defs.push(WindowDef {
@@ -2390,6 +2450,7 @@ mod parse_tests {
             "demo-7",
             "run-1",
             &runtime_identity,
+            "team",
         );
 
         assert_eq!(defs.len(), super::GRID_ORDER.len());
@@ -2438,6 +2499,7 @@ mod parse_tests {
             "demo-7",
             "run-1",
             &runtime_identity,
+            "team",
         );
 
         let orch = defs

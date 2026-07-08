@@ -293,6 +293,7 @@ mod tests {
             slot_number: 1,
             status: "active".to_string(),
             created_at: Utc::now(),
+            pattern: "team".to_string(),
         }
     }
 

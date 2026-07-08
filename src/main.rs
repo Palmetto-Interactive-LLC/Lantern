@@ -87,6 +87,22 @@ enum Commands {
         /// Skip initialization prompts
         #[arg(long)]
         no_init: bool,
+        /// Launch pattern: team | executor | simple | fixbug. Skips all
+        /// interactive menus when set (errors if a required flag is missing).
+        #[arg(long)]
+        pattern: Option<String>,
+        /// Model pick (label or id) for executor/worker/fixer, depending on pattern.
+        #[arg(long)]
+        model: Option<String>,
+        /// Orchestrator model pick (label or id) for --pattern simple.
+        #[arg(long = "orch-model")]
+        orch_model: Option<String>,
+        /// Worker count (1-10, default 4) for --pattern simple.
+        #[arg(long)]
+        workers: Option<u8>,
+        /// Issue reference for --pattern fixbug.
+        #[arg(long)]
+        issue: Option<String>,
     },
     /// Run the Lantern MCP stdio server (spawn this as a child process from agent CLIs)
     Mcp,
@@ -185,10 +201,31 @@ async fn main() -> anyhow::Result<()> {
             positionals,
             agent,
             no_init,
+            pattern,
+            model,
+            orch_model,
+            workers,
+            issue,
         } => {
             let (name, number, agent_override) =
                 startwork::parse_startwork_args(positionals, agent);
-            startwork::launch(name.as_deref(), number, agent_override.as_deref(), no_init).await
+            let pattern_config =
+                startwork::menu::resolve_pattern(startwork::menu::PatternCliArgs {
+                    pattern,
+                    agent: agent_override.clone(),
+                    model,
+                    orch_model,
+                    workers,
+                    issue,
+                })?;
+            startwork::launch(
+                name.as_deref(),
+                number,
+                no_init,
+                pattern_config,
+                agent_override.as_deref(),
+            )
+            .await
         }
         Commands::Stopwork {
             session,
@@ -637,6 +674,7 @@ mod tests {
                 positionals,
                 agent: Some(agent),
                 no_init: true,
+                ..
             } => {
                 assert_eq!(positionals, ["lantern-smoke", "97"]);
                 assert_eq!(agent, "goose");
@@ -663,6 +701,7 @@ mod tests {
                 positionals,
                 agent: Some(agent),
                 no_init: true,
+                ..
             } => {
                 assert_eq!(positionals, ["lantern-smoke", "97"]);
                 assert_eq!(agent, "goose");

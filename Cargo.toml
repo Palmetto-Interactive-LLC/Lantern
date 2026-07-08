@@ -31,6 +31,7 @@ toml = "1.1"
 iterm2 = "0.2.1"
 temporal-sdk-core-protos = "0.1.0"
 hex = "0.4.3"
+inquire = "0.9"
 
 [dev-dependencies]
 tempfile = "3"

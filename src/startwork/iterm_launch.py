@@ -28,9 +28,31 @@ import argparse
 import asyncio
 import json
 import sys
+import tempfile
 from pathlib import Path
 
 import iterm2
+
+
+def read_handoff_json(raw: str, required: bool = False) -> dict:
+    """Read a JSON handoff file written by the lantern parent process.
+
+    Only devorch-*.json files that resolve directly into the system temp
+    directory are accepted, so the CLI argument cannot name an arbitrary
+    filesystem path.
+    """
+    path = Path(raw).resolve()
+    allowed = {Path(tempfile.gettempdir()).resolve(), Path("/tmp").resolve()}
+    if path.parent not in allowed:
+        raise SystemExit(f"refusing to read handoff file outside temp dir: {raw}")
+    if not (path.name.startswith("devorch-") and path.name.endswith(".json")):
+        raise SystemExit(f"unexpected handoff filename: {raw}")
+    if not path.is_file():
+        if required:
+            raise SystemExit(f"required handoff file missing: {raw}")
+        return {}
+    return json.loads(path.read_text(encoding="utf-8"))
+
 
 
 ROLE_COLORS: dict[str, tuple[int, int, int]] = {
@@ -337,17 +359,13 @@ if __name__ == "__main__":
     startup_by_role: dict[str, str] = {}
     layout: dict = DEFAULT_LAYOUT
     if args.startup_file:
-        path = Path(args.startup_file)
-        if path.is_file():
-            payload = json.loads(path.read_text(encoding="utf-8"))
-            startup_by_role = payload.get("commands", {})
-            layout = payload.get("layout") or DEFAULT_LAYOUT
+        payload = read_handoff_json(args.startup_file)
+        startup_by_role = payload.get("commands", {})
+        layout = payload.get("layout") or DEFAULT_LAYOUT
 
     titles_by_role: dict[str, str] = {}
     if args.titles_file:
-        path = Path(args.titles_file)
-        if path.is_file():
-            titles_by_role = json.loads(path.read_text(encoding="utf-8"))
+        titles_by_role = read_handoff_json(args.titles_file)
 
     iterm2.run_until_complete(
         lambda conn: main(conn, args.session, titles_by_role, startup_by_role, layout)

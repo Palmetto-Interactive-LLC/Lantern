@@ -20,9 +20,31 @@ import argparse
 import asyncio
 import json
 import sys
+import tempfile
 from pathlib import Path
 
 import iterm2
+
+
+def read_handoff_json(raw: str, required: bool = False) -> dict:
+    """Read a JSON handoff file written by the lantern parent process.
+
+    Only devorch-*.json files that resolve directly into the system temp
+    directory are accepted, so the CLI argument cannot name an arbitrary
+    filesystem path.
+    """
+    path = Path(raw).resolve()
+    allowed = {Path(tempfile.gettempdir()).resolve(), Path("/tmp").resolve()}
+    if path.parent not in allowed:
+        raise SystemExit(f"refusing to read handoff file outside temp dir: {raw}")
+    if not (path.name.startswith("devorch-") and path.name.endswith(".json")):
+        raise SystemExit(f"unexpected handoff filename: {raw}")
+    if not path.is_file():
+        if required:
+            raise SystemExit(f"required handoff file missing: {raw}")
+        return {}
+    return json.loads(path.read_text(encoding="utf-8"))
+
 
 
 async def set_pane_appearance(
@@ -261,19 +283,15 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
 
-    layout: dict = json.loads(Path(args.layout_file).read_text(encoding="utf-8"))
+    layout: dict = read_handoff_json(args.layout_file, required=True)
 
     startup_by_role: dict[str, str] = {}
     if args.startup_file:
-        path = Path(args.startup_file)
-        if path.is_file():
-            startup_by_role = json.loads(path.read_text(encoding="utf-8"))
+        startup_by_role = read_handoff_json(args.startup_file)
 
     titles_by_role: dict[str, str] = {}
     if args.titles_file:
-        path = Path(args.titles_file)
-        if path.is_file():
-            titles_by_role = json.loads(path.read_text(encoding="utf-8"))
+        titles_by_role = read_handoff_json(args.titles_file)
 
     iterm2.run_until_complete(
         lambda conn: main(conn, args.session, layout, titles_by_role, startup_by_role)

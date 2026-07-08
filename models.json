@@ -1,0 +1,74 @@
+{
+  "manifest_version": 1,
+  "updated": "2026-07-07",
+  "frontier": {
+    "claude": "claude-fable-5",
+    "openai": "gpt-5.5",
+    "gemini": "gemini-3.1-pro"
+  },
+  "models": [
+    {
+      "label": "Sonnet 5 High",
+      "agent": "claude",
+      "model_id": "claude-sonnet-5",
+      "effort": "high",
+      "tier": "executor"
+    },
+    {
+      "label": "Haiku High",
+      "agent": "claude",
+      "model_id": "claude-haiku-4-5",
+      "effort": "high",
+      "tier": "executor"
+    },
+    {
+      "label": "GPT 5.5 High",
+      "agent": "codex",
+      "model_id": "gpt-5.5",
+      "effort": "high",
+      "tier": "executor"
+    },
+    {
+      "label": "GPT 5.5 Medium",
+      "agent": "codex",
+      "model_id": "gpt-5.5",
+      "effort": "medium",
+      "tier": "executor"
+    },
+    {
+      "label": "GPT 5.3 Codex Spark",
+      "agent": "codex",
+      "model_id": "gpt-5.3-codex-spark",
+      "effort": "medium",
+      "tier": "executor"
+    },
+    {
+      "label": "Gemini 3.5 Flash (High)",
+      "agent": "gemini",
+      "model_id": "gemini-3.5-flash",
+      "effort": "high",
+      "tier": "executor"
+    },
+    {
+      "label": "Gemini 3.1 Pro (High)",
+      "agent": "gemini",
+      "model_id": "gemini-3.1-pro",
+      "effort": "high",
+      "tier": "executor"
+    },
+    {
+      "label": "Fable 5 XHIGH",
+      "agent": "claude",
+      "model_id": "claude-fable-5",
+      "effort": "xhigh",
+      "tier": "orchestrator"
+    },
+    {
+      "label": "Opus 4.8 XHIGH",
+      "agent": "claude",
+      "model_id": "claude-opus-4-8",
+      "effort": "xhigh",
+      "tier": "orchestrator"
+    }
+  ]
+}

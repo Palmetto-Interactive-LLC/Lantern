@@ -69,9 +69,36 @@ impl ModelChoice {
     }
 }
 
+/// Prefer the self-updating model registry's cached manifest
+/// (`~/.lantern/data/models_cache.json`, see `models_registry`) when it has
+/// entries for `tier`, falling back to `None` so callers can use their
+/// compiled-in table. Never touches the network — `load_menu_override()` is
+/// a plain file read.
+fn menu_override_for_tier(tier: &str) -> Option<Vec<ModelChoice>> {
+    let manifest = crate::models_registry::load_menu_override()?;
+    let entries: Vec<ModelChoice> = manifest
+        .models
+        .into_iter()
+        .filter(|m| m.tier == tier)
+        .filter_map(|m| {
+            let agent = AgentKind::parse(&m.agent)?;
+            Some(ModelChoice::new(agent, &m.model_id, &m.effort, &m.label))
+        })
+        .collect();
+    if entries.is_empty() {
+        None
+    } else {
+        Some(entries)
+    }
+}
+
 /// Model menu shared by the executor / worker / fixer picks. First entry is
-/// the default ("Sonnet 5 High").
+/// the default ("Sonnet 5 High"). Prefers the cached model registry manifest
+/// when present (see `menu_override_for_tier`).
 pub fn executor_model_menu() -> Vec<ModelChoice> {
+    if let Some(menu) = menu_override_for_tier("executor") {
+        return menu;
+    }
     vec![
         ModelChoice::new(
             AgentKind::Claude,
@@ -104,8 +131,12 @@ pub fn executor_model_menu() -> Vec<ModelChoice> {
 }
 
 /// Orchestrator menu for `SimpleOrchestrator`'s `orch` pick. First entry is
-/// the default ("Fable 5 XHIGH").
+/// the default ("Fable 5 XHIGH"). Prefers the cached model registry manifest
+/// when present (see `menu_override_for_tier`).
 pub fn orchestrator_model_menu() -> Vec<ModelChoice> {
+    if let Some(menu) = menu_override_for_tier("orchestrator") {
+        return menu;
+    }
     vec![
         ModelChoice::new(
             AgentKind::Claude,

@@ -888,7 +888,17 @@ pub async fn handle_get_setup_instructions(
     }
     let parsed: Args = serde_json::from_value(args)?;
 
-    let instructions = if parsed.role == "orchestrator" {
+    // Pattern-aware instructions: DEVORCH_PATTERN is exported to every pane by
+    // startwork (see startwork::launch_executor's base_window_env call). Only
+    // the `executor` pattern has bespoke prompt text today (advisor-timing
+    // for `executor`, quiet-advisor rules for `advisor`); other patterns fall
+    // through to the legacy orchestrator/worker instructions below.
+    let pattern = std::env::var("DEVORCH_PATTERN").unwrap_or_default();
+    let instructions = if pattern == "executor" && parsed.role == "executor" {
+        crate::prompts::executor::executor_instructions(&parsed.session, &parsed.agent)
+    } else if pattern == "executor" && parsed.role == "advisor" {
+        crate::prompts::executor::advisor_instructions(&parsed.session, &parsed.agent)
+    } else if parsed.role == "orchestrator" {
         format!(
             "You are the orchestrator for session {} (agent: {}).\n\
              You lead a LIVE TEAM of specialist workers, each in its own pane with a domain skill:\n\
@@ -920,6 +930,159 @@ pub async fn handle_get_setup_instructions(
         "status": "ok",
         "instructions": instructions
     }))
+}
+
+/// `[advisor:question]` prompt → advisor pane.
+fn format_advisor_question_prompt(
+    message_id: &str,
+    from_role: &str,
+    question: &str,
+    context_summary: &str,
+) -> String {
+    let mut lines: Vec<String> = Vec::new();
+    lines.push("[advisor:question]".to_string());
+    lines.push(format!("message_id={message_id}"));
+    lines.push(format!("from={from_role}"));
+    lines.push(String::new());
+    lines.push(question.to_string());
+    if !context_summary.is_empty() {
+        lines.push(String::new());
+        lines.push("Context:".to_string());
+        lines.push(context_summary.to_string());
+    }
+    lines.push(String::new());
+    lines.push("Reply with your advice via:".to_string());
+    lines.push(format!(
+        "  devorch_peer_message to_role={from_role} task_id={message_id} info=\"<your advice>\""
+    ));
+    lines.join("\n")
+}
+
+/// Tool: devorch_ask_advisor
+///
+/// Input: `{ session, role, question, context_summary? }`. `role` is the
+/// asking pane's own role (e.g. `executor`). Delivers `question` to the
+/// session's `advisor` pane (reusing the same pane-injection path as
+/// `devorch_peer_message`) and blocks until the advisor replies via
+/// `devorch_peer_message` addressed back to the caller with a matching
+/// `task_id`, or the timeout elapses.
+pub async fn handle_ask_advisor(pool: &SqlitePool, args: Value) -> anyhow::Result<Value> {
+    match ask_advisor_inner(pool, &args).await {
+        Ok(v) => Ok(v),
+        Err(e) => Ok(err_text(format!("Failed to reach advisor: {e}"))),
+    }
+}
+
+const ADVISOR_TIMEOUT_SECS: u64 = 240;
+const ADVISOR_POLL_INTERVAL_MS: u64 = 1500;
+
+async fn ask_advisor_inner(pool: &SqlitePool, params: &Value) -> anyhow::Result<Value> {
+    let session = require_str(params, "session").map_err(|e| anyhow::anyhow!("{e}"))?;
+    let role = require_str(params, "role").map_err(|e| anyhow::anyhow!("{e}"))?;
+    let question = require_str(params, "question").map_err(|e| anyhow::anyhow!("{e}"))?;
+    let context_summary = params
+        .get("context_summary")
+        .and_then(Value::as_str)
+        .unwrap_or("");
+
+    // Lightweight session scope guard (parity with dispatch_task/inbox): if
+    // DEVORCH_SESSION is set, the caller's session must match.
+    if let Ok(active) = std::env::var("DEVORCH_SESSION") {
+        if !active.is_empty() && session != active {
+            anyhow::bail!(
+                "session '{}' does not match active DEVORCH_SESSION '{}'",
+                session,
+                active
+            );
+        }
+    }
+
+    let agents = queries::get_agents_for_session(pool, session).await?;
+    let advisor_agent = agents.iter().find(|a| a.role == "advisor").cloned();
+    if advisor_agent.is_none() {
+        anyhow::bail!(
+            "no advisor agent for session {session} (this launch pattern has no advisor pane)"
+        );
+    }
+    let advisor_agent_id = advisor_agent.map(|a| a.id);
+
+    let message_id = generate_id("ask");
+    let prompt = format_advisor_question_prompt(&message_id, role, question, context_summary);
+
+    // Log as a peer_message-shaped event (same event_type devorch_peer_message
+    // uses) for auditability, then inject via the same pane-delivery primitive.
+    let payload = json!({
+        "session": session,
+        "from_role": role,
+        "to_role": "advisor",
+        "task_id": message_id,
+        "info": question,
+        "context_summary": context_summary,
+    });
+    queries::log_event(
+        pool,
+        session,
+        advisor_agent_id.as_deref(),
+        "peer_message",
+        Some(&payload.to_string()),
+    )
+    .await?;
+
+    // Capture the polling cursor BEFORE injecting, so a fast advisor reply
+    // can never land before we start looking for it.
+    let start_cursor: i64 = sqlx::query_scalar("SELECT COALESCE(MAX(id), 0) FROM events")
+        .fetch_one(pool)
+        .await
+        .unwrap_or(0);
+
+    try_inject(pool, session, "advisor", &prompt).await;
+    if let Some(agent_id) = advisor_agent_id.as_deref() {
+        let _ = queries::mark_agent_signal(pool, agent_id, Some(&message_id), true).await;
+    }
+
+    let timeout = std::time::Duration::from_secs(ADVISOR_TIMEOUT_SECS);
+    let poll_interval = std::time::Duration::from_millis(ADVISOR_POLL_INTERVAL_MS);
+    let deadline = tokio::time::Instant::now() + timeout;
+    let mut cursor = start_cursor;
+
+    loop {
+        let rows: Vec<(i64, Option<String>)> = sqlx::query_as(
+            "SELECT id, payload FROM events \
+             WHERE session_id = ? AND event_type = 'peer_message' AND id > ? \
+             ORDER BY id ASC",
+        )
+        .bind(session)
+        .bind(cursor)
+        .fetch_all(pool)
+        .await?;
+
+        for (id, payload) in rows {
+            cursor = cursor.max(id);
+            let Some(p) = payload else { continue };
+            let Ok(v) = serde_json::from_str::<Value>(&p) else {
+                continue;
+            };
+            let from_role = v.get("from_role").and_then(Value::as_str).unwrap_or("");
+            let to_role = v.get("to_role").and_then(Value::as_str).unwrap_or("");
+            let task_id = v.get("task_id").and_then(Value::as_str).unwrap_or("");
+            if from_role == "advisor" && to_role == role && task_id == message_id {
+                let advice = v
+                    .get("info")
+                    .and_then(Value::as_str)
+                    .unwrap_or("")
+                    .to_string();
+                return Ok(ok_text(advice));
+            }
+        }
+
+        if tokio::time::Instant::now() >= deadline {
+            return Ok(err_text(format!(
+                "Advisor did not respond within {}s. Proceed using your own best judgment and evidence.",
+                timeout.as_secs()
+            )));
+        }
+        tokio::time::sleep(poll_interval).await;
+    }
 }
 
 // ── helpers for the new tools ─────────────────────────────────────────────────

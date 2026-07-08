@@ -5,6 +5,7 @@ mod delivery;
 mod doctor_state;
 mod human;
 mod mcp;
+mod prompts;
 mod recovery;
 mod startwork;
 mod stopwork;

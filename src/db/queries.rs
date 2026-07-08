@@ -13,7 +13,7 @@ pub async fn insert_machine(pool: &SqlitePool, machine_id: &str) -> anyhow::Resu
 
 pub async fn insert_session(pool: &SqlitePool, session: &Session) -> anyhow::Result<()> {
     sqlx::query(
-        "INSERT INTO sessions (id, machine_id, project_slug, slot_number, status, created_at) VALUES (?, ?, ?, ?, ?, ?)"
+        "INSERT INTO sessions (id, machine_id, project_slug, slot_number, status, created_at, pattern) VALUES (?, ?, ?, ?, ?, ?, ?)"
     )
     .bind(&session.id)
     .bind(&session.machine_id)
@@ -21,6 +21,7 @@ pub async fn insert_session(pool: &SqlitePool, session: &Session) -> anyhow::Res
     .bind(session.slot_number)
     .bind(&session.status)
     .bind(session.created_at.to_rfc3339())
+    .bind(&session.pattern)
     .execute(pool)
     .await?;
     Ok(())
@@ -266,7 +267,7 @@ pub async fn get_active_sessions(pool: &SqlitePool) -> anyhow::Result<Vec<String
 
 pub async fn get_session(pool: &SqlitePool, session_id: &str) -> anyhow::Result<Option<Session>> {
     let row = sqlx::query_as::<_, Session>(
-        "SELECT id, machine_id, project_slug, slot_number, status, created_at FROM sessions WHERE id = ?"
+        "SELECT id, machine_id, project_slug, slot_number, status, created_at, pattern FROM sessions WHERE id = ?"
     )
     .bind(session_id)
     .fetch_optional(pool)
@@ -276,7 +277,7 @@ pub async fn get_session(pool: &SqlitePool, session_id: &str) -> anyhow::Result<
 
 pub async fn get_all_sessions(pool: &SqlitePool) -> anyhow::Result<Vec<Session>> {
     let rows = sqlx::query_as::<_, Session>(
-        "SELECT id, machine_id, project_slug, slot_number, status, created_at FROM sessions ORDER BY created_at DESC"
+        "SELECT id, machine_id, project_slug, slot_number, status, created_at, pattern FROM sessions ORDER BY created_at DESC"
     )
     .fetch_all(pool)
     .await?;
@@ -563,6 +564,7 @@ mod tests {
             slot_number: 1,
             status: "active".to_string(),
             created_at: Utc::now(),
+            pattern: "team".to_string(),
         }
     }
 

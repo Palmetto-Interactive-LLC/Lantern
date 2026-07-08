@@ -58,12 +58,96 @@ instead of downloading a release unless `LANTERN_FORCE_DOWNLOAD=1` is set.
 
 ## Launch A Squad
 
+### Quick Start (Legacy Team Pattern)
+
 ```bash
 lantern up
 lantern startwork myproject 99 --agent claude --no-init
 lantern status
 lantern stopwork myproject-99
 ```
+
+### Launch Patterns
+
+`startwork` supports four patterns for squad composition. When run interactively (connected to a terminal), you'll see a menu. Non-interactive use (pipes, CI) requires the `--pattern` flag and related model/configuration flags.
+
+#### 1. Team Orchestrator (default)
+Traditional 9-pane grid: orchestrator, AI, data, platform, docs, security, ops, UI, QA, plus an input router. All panes run the same agent CLI family.
+
+```bash
+# Interactive: menu prompts for agent (Claude/Codex/Gemini)
+lantern startwork myproject 99
+
+# Non-interactive: specify agent
+lantern startwork myproject 99 --pattern team --agent claude
+lantern startwork myproject 99 --pattern team --agent codex
+```
+
+#### 2. Executor
+Single executor worktree (70%) + a non-worktree Fable 5 XHIGH advisor (30%) + input router. Suited for focused deep-work with advisor feedback.
+
+```bash
+# Interactive: menu prompts for executor model
+lantern startwork myproject 99 --pattern executor
+
+# Non-interactive: specify executor model
+lantern startwork myproject 99 --pattern executor --model "Sonnet 5 High"
+lantern startwork myproject 99 --pattern executor --model claude-haiku-4-5
+```
+
+#### 3. Simple Orchestrator
+Orchestrator pane (33%) + 1–10 worker panes (default 4) + input router. Orchestrator coordinates; workers execute tasks independently.
+
+```bash
+# Interactive: menus for orchestrator model, worker count, worker model
+lantern startwork myproject 99 --pattern simple
+
+# Non-interactive: specify models and worker count
+lantern startwork myproject 99 --pattern simple --orch-model "Fable 5 XHIGH" --workers 6 --model "Sonnet 5 High"
+
+# Defaults: Fable 5 XHIGH orchestrator, 4 workers, Sonnet 5 High workers
+lantern startwork myproject 99 --pattern simple
+```
+
+#### 4. Fix a Bug
+Single fixer worktree (full width) + input router. Targeted at a specific issue.
+
+```bash
+# Interactive: menu prompts for fixer model and issue reference
+lantern startwork myproject 99 --pattern fixbug
+
+# Non-interactive: specify fixer model and issue reference
+lantern startwork myproject 99 --pattern fixbug --issue "PROJ-123" --model "Sonnet 5 High"
+```
+
+### Model Menu
+
+All patterns use one of these model menus:
+
+**Executor/Worker/Fixer models** (default: **Sonnet 5 High**):
+- Sonnet 5 High — `claude-sonnet-5` @ high effort
+- Haiku High — `claude-haiku-4-5` @ high effort
+- GPT 5.5 High — `gpt-5.5` @ high effort
+- GPT 5.5 Medium — `gpt-5.5` @ medium effort
+- GPT 5.3 Codex Spark — `gpt-5.3-codex-spark` @ medium effort
+- Gemini 3.5 Flash (High) — `gemini-3.5-flash` @ high effort
+- Gemini 3.1 Pro (High) — `gemini-3.1-pro` @ high effort
+
+**Orchestrator models** (default: **Fable 5 XHIGH**):
+- Fable 5 XHIGH — `claude-fable-5` @ xhigh effort
+- Opus 4.8 XHIGH — `claude-opus-4-8` @ xhigh effort
+
+Specify models by label or model ID: `--model "Sonnet 5 High"` or `--model claude-sonnet-5`. Interactive menus show labels; non-interactive flags accept both.
+
+### Flags Reference
+
+- `--pattern <team|executor|simple|fixbug>`: Choose launch pattern. Skips interactive menus if set.
+- `--agent <claude|codex|gemini>`: Agent CLI family (Team pattern only).
+- `--model <label|id>`: Model for executor/worker/fixer panes.
+- `--orch-model <label|id>`: Orchestrator model (Simple pattern only).
+- `--workers <1-10>`: Worker count (Simple pattern only, default 4).
+- `--issue <ref>`: Issue reference (Fix a Bug pattern only).
+- `--no-init`: Skip initialization prompts.
 
 Use a disposable repository and high slot number for first tests. Full launch requires iTerm2's Python API and the selected agent CLI to be configured locally.
 

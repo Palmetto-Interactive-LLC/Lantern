@@ -1,0 +1,117 @@
+name: Models Manifest Refresh
+
+on:
+  schedule:
+    - cron: "23 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  refresh:
+    name: refresh
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: true
+
+      - name: Scrape public model listings for newer ids
+        id: scrape
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/models-scan"
+          scan="$RUNNER_TEMP/models-scan/found_ids.txt"
+          : > "$scan"
+
+          # Best-effort scrape of the public model-listing docs. Each source
+          # is optional — a fetch failure just means fewer candidate ids,
+          # never a workflow failure.
+          fetch() {
+            curl -fsSL --max-time 15 "$1" 2>/dev/null || true
+          }
+
+          fetch "https://platform.claude.com/docs/en/about-claude/models" \
+            | grep -oE 'claude-[a-z0-9.-]+' >> "$scan" || true
+          fetch "https://platform.openai.com/docs/models" \
+            | grep -oE 'gpt-[a-z0-9.-]+' >> "$scan" || true
+          fetch "https://ai.google.dev/gemini-api/docs/models" \
+            | grep -oE 'gemini-[a-z0-9.-]+' >> "$scan" || true
+
+          sort -u "$scan" -o "$scan"
+
+          known_ids=$(python3 -c '
+          import json
+          manifest = json.load(open("models.json"))
+          for m in manifest["models"]:
+              print(m["model_id"])
+          ')
+
+          new_ids=$(comm -23 "$scan" <(printf '%s\n' "$known_ids" | sort -u))
+
+          {
+            echo "new_ids<<MODELS_EOF"
+            echo "$new_ids"
+            echo "MODELS_EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Update models.json and open a PR
+        if: steps.scrape.outputs.new_ids != ''
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NEW_IDS: ${{ steps.scrape.outputs.new_ids }}
+        run: |
+          set -euo pipefail
+          today=$(date -u +%Y-%m-%d)
+          TODAY="$today" python3 -c '
+          import json, os
+
+          new_ids = [line for line in os.environ["NEW_IDS"].splitlines() if line.strip()]
+          if not new_ids:
+              raise SystemExit(0)
+
+          path = "models.json"
+          manifest = json.load(open(path))
+          manifest["updated"] = os.environ["TODAY"]
+          for model_id in new_ids:
+              manifest["models"].append({
+                  "label": model_id,
+                  "agent": "unknown",
+                  "model_id": model_id,
+                  "effort": "unknown",
+                  "tier": "candidate",
+              })
+          with open(path, "w") as f:
+              json.dump(manifest, f, indent=2)
+              f.write("\n")
+          '
+
+          if git diff --quiet -- models.json; then
+            echo "No effective change to models.json; skipping PR."
+            exit 0
+          fi
+
+          branch="models-manifest/$today"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git checkout -b "$branch"
+          git add models.json
+          commit_msg=$(printf '%s\n\n%s\n\n%s' \
+            "Refresh models.json with newly observed model ids" \
+            "Automated weekly scrape of public model-listing docs found ids not yet present in models.json. New entries land with tier=\"candidate\" and placeholder agent/effort for manual triage before promotion into the executor/orchestrator menus." \
+            "Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>")
+          git commit -m "$commit_msg"
+          git push -u origin "$branch"
+
+          gh pr create \
+            --title "Refresh models.json ($today)" \
+            --body "Automated weekly scrape found model ids not present in \`models.json\`. New entries are added with \`tier: \"candidate\"\` for manual review — promote them into the executor/orchestrator menus (and \`src/startwork/patterns.rs\`) once verified against the shared model-menu contract." \
+            --base main \
+            --head "$branch"

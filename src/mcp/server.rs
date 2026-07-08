@@ -144,6 +144,7 @@ impl McpServer {
                     "devorch_event_publish" => {
                         tools::handle_event_publish(&self.pool, arguments).await
                     }
+                    "devorch_ask_advisor" => tools::handle_ask_advisor(&self.pool, arguments).await,
                     _ => Err(anyhow::anyhow!("Unknown tool: {}", name)),
                 };
 
@@ -372,6 +373,20 @@ fn tools_schema() -> Value {
                 },
                 "required": ["session", "event_type", "publisher"]
             }
+        },
+        {
+            "name": "devorch_ask_advisor",
+            "description": "Ask the session's advisor (Executor pattern only) a question and block for its reply. Use before substantive work, when stuck, and before declaring done.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "session":         { "type": "string", "description": "Current session ID" },
+                    "role":            { "type": "string", "description": "Your own role (e.g. executor)" },
+                    "question":        { "type": "string", "description": "The question for the advisor" },
+                    "context_summary": { "type": "string", "description": "Optional brief context (what you've tried, key evidence)" }
+                },
+                "required": ["session", "role", "question"]
+            }
         }
     ])
 }
@@ -425,8 +440,8 @@ mod tests {
         let names = tool_names();
         assert_eq!(
             names.len(),
-            11,
-            "expected exactly 11 tools, got {}",
+            12,
+            "expected exactly 12 tools, got {}",
             names.len()
         );
         for expected in &[
@@ -441,6 +456,7 @@ mod tests {
             "devorch_peer_message",
             "devorch_event_subscribe",
             "devorch_event_publish",
+            "devorch_ask_advisor",
         ] {
             assert!(
                 names.contains(&expected.to_string()),

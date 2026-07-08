@@ -51,17 +51,143 @@ Do not add `.op-environment`, `.envrc`, or SOPS config — this is a local CLI t
 
 Docker Temporal is strictly unsupported.
 
+## Launch Patterns
+
+`startwork` dispatches on one of four squad configurations, each with its own pane layout, role specs, and model menu:
+
+### Pattern 1: Team Orchestrator
+The legacy 9-pane grid: 3 columns (orch+input, then two 4-pane columns). All panes use the same agent CLI family (`--agent claude|codex|gemini`). Behavior is byte-identical to the main-branch team launch.
+
+**Flags:**
+- `--pattern team`
+- `--agent claude|codex|gemini` (default: claude)
+
+**Layout:** 3 columns (33/33/34 weight)
+- Column 1: `orch`, `inp`
+- Column 2: `ai`, `dat`, `plt`, `doc`
+- Column 3: `sec`, `ops`, `ui`, `qa`
+
+### Pattern 2: Executor
+Focused single-pane workflow: 70% executor worktree + 30% non-worktree advisor (Fable 5 XHIGH, implicit, not selectable) + input router stacked below executor.
+
+**Flags:**
+- `--pattern executor`
+- `--model <label|id>` (default: Sonnet 5 High)
+
+**Layout:** 2 columns
+- Column 1 (70%): `executor`, `inp`
+- Column 2 (30%): `advisor`
+
+**Advisor Model:** Always `claude-fable-5` @ xhigh. Rides alongside without claiming a worktree slot.
+
+### Pattern 3: Simple Orchestrator
+Coordinated multi-worker: 1 orchestrator + 1–10 workers (default 4) + input router. Orchestrator picks from orchestrator menu (Fable 5 XHIGH | Opus 4.8 XHIGH); workers pick from executor menu.
+
+**Flags:**
+- `--pattern simple`
+- `--orch-model <label|id>` (default: Fable 5 XHIGH)
+- `--model <label|id>` (default: Sonnet 5 High)
+- `--workers 1-10` (default: 4)
+
+**Layout:**
+- Workers ≤ 5: 2 columns (33/67 weight)
+  - Column 1: `orch`, `inp`
+  - Column 2: worker panes
+- Workers > 5: 3 columns (33/34/33 weight)
+  - Column 1: `orch`, `inp`
+  - Column 2–3: workers split across columns
+
+**Worker Names:** `worker-1`, `worker-2`, … with distinct RGB colors from the team palette.
+
+### Pattern 4: Fix a Bug
+Targeted single-pane fix: 100% fixer worktree + input router stacked below.
+
+**Flags:**
+- `--pattern fixbug`
+- `--issue <ref>` (required)
+- `--model <label|id>` (default: Sonnet 5 High)
+
+**Layout:** 1 column (100% weight)
+- Column 1: `fixer`, `inp`
+
+### Model Menus
+
+**Executor/Worker/Fixer Menu** (first entry is default):
+1. Sonnet 5 High — `claude-sonnet-5` @ high
+2. Haiku High — `claude-haiku-4-5` @ high
+3. GPT 5.5 High — `gpt-5.5` @ high
+4. GPT 5.5 Medium — `gpt-5.5` @ medium
+5. GPT 5.3 Codex Spark — `gpt-5.3-codex-spark` @ medium
+6. Gemini 3.5 Flash (High) — `gemini-3.5-flash` @ high
+7. Gemini 3.1 Pro (High) — `gemini-3.1-pro` @ high
+
+**Orchestrator Menu** (first entry is default):
+1. Fable 5 XHIGH — `claude-fable-5` @ xhigh
+2. Opus 4.8 XHIGH — `claude-opus-4-8` @ xhigh
+
+### Interaction Modes
+
+**Interactive (tty-attached, no `--pattern`):**
+- Menu 1: Select pattern (Team / Executor / Simple / Fix a Bug)
+- Menu 2+: Pattern-specific prompts (agent, model, worker count, issue, etc.)
+
+**Non-Interactive (`--pattern` set):**
+- Fully declarative: all required flags must be supplied or defaults apply
+- Errors if a required flag is missing (e.g., `--pattern fixbug` without `--issue`)
+- No prompts, suitable for CI/scripts
+
+**Scripted (no `--pattern`, stdin not tty):**
+- Defaults to `team + claude` (legacy `startwork` behavior)
+
+### Environment Export
+
+Every pane's environment receives `DEVORCH_PATTERN=<slug>` (`team`, `executor`, `simple`, `fixbug`), enabling agents to self-configure based on squad shape.
+
+### Models Freshness (Planned)
+
+The `models.json` mechanism (not yet fully implemented) will:
+- Cache available models locally at `~/.lantern/data/models.json` with 24-hour freshness
+- Update on `lantern up` and `lantern doctor` (if stale)
+- Manual refresh: `lantern models sync`
+- Weekly GitHub Action manifest to publish model updates
+- Selector will fall back to hardcoded defaults if the cache is unavailable
+
 ## Key Commands
 
+### Service Management
 ```bash
-lantern up          # Start background services (Temporal dev server + relay)
-lantern down        # Stop background services
-lantern doctor      # Health check all local dependencies
-lantern status      # Show local inventory from SQLite
-lantern startwork <project> <slot> --agent claude   # Launch a squad
-lantern stopwork <project>-<slot>                   # Tear down a squad
-lantern logs <relay|temporal>                       # Tail service logs
-lantern mcp         # Start MCP server (for agents)
+lantern up                                        # Start background services (Temporal + relay)
+lantern down                                      # Stop background services
+lantern restart                                   # Restart background services
+lantern doctor                                    # Health check all local dependencies
+lantern logs <relay|temporal>                     # Tail service logs
+```
+
+### Squad Control
+```bash
+lantern startwork <project> <slot> [--pattern <pattern>] [flags]
+                                                  # Launch a squad (interactive or --pattern for non-interactive)
+lantern stopwork [session]                        # Tear down a squad
+lantern stopwork --all                            # Stop all active squads
+lantern stopwork --list                           # List active squads
+lantern status                                    # Show all squads and agents from SQLite
+```
+
+### Agent Control
+```bash
+lantern pause <agent>                             # Pause an agent pane
+lantern resume <agent>                            # Resume a paused agent
+lantern takeover <agent>                          # Human takes manual control
+lantern release <agent>                           # Release manual control back to agent
+lantern recover <agent>                           # Force recovery of an agent
+lantern note <agent> <message>                    # Inject a note into an agent pane
+```
+
+### MCP & Introspection
+```bash
+lantern mcp                                       # Start MCP server (stdio, for agent CLIs)
+lantern models                                    # Display available model menu
+lantern models sync                               # Refresh model freshness (24h cache)
 ```
 
 ## CI

@@ -11,6 +11,9 @@ pub struct Session {
     pub slot_number: i64,
     pub status: String,
     pub created_at: DateTime<Utc>,
+    /// Launch pattern this session was started with: "team" | "executor" | "simple" | "fixbug".
+    /// See migration 008_pattern_column.sql.
+    pub pattern: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]

@@ -20,8 +20,14 @@ use tracing::{info, warn};
 use crate::db::queries;
 use crate::types::{generate_id, Agent, Session, TerminalTarget};
 
+mod fixbug;
+pub mod menu;
+pub mod patterns;
+
+use patterns::{AgentKind, ModelChoice, PatternConfig};
+
 /// Teams in the squad grid (4×2 + 1 qa).
-const GRID_ORDER: &[&str] = &[
+pub(crate) const GRID_ORDER: &[&str] = &[
     "orch", "ai", "dat", "sec", "ops", "plt", "ui", "doc", "qa", "inp",
 ];
 
@@ -37,7 +43,7 @@ const CODEX_LAUNCH_ERROR_WINDOW: Duration = Duration::from_secs(5);
 const DEVORCH_DEFAULT_TASK_QUEUE: &str = "lantern-devorch";
 
 /// Team labels for pane titles.
-const TEAM_LABELS: &[(&str, &str)] = &[
+pub(crate) const TEAM_LABELS: &[(&str, &str)] = &[
     ("orch", "ORCH"),
     ("ai", "AI"),
     ("dat", "DAT"),
@@ -67,7 +73,7 @@ pub fn parse_startwork_args(
             let last_lower = last.to_ascii_lowercase();
             if KNOWN_AGENT_KINDS.contains(&last_lower.as_str()) {
                 let mut a = positionals.pop().unwrap();
-                if a.eq_ignore_ascii_case("agi") {
+                if a.eq_ignore_ascii_case("agi") || a.eq_ignore_ascii_case("gemini") {
                     a = "agy".to_string();
                 }
                 agent = Some(a);
@@ -95,7 +101,7 @@ pub fn parse_startwork_args(
 }
 
 /// Team colors (RGB) for pane backgrounds.
-const TEAM_COLORS: &[(&str, [u8; 3])] = &[
+pub(crate) const TEAM_COLORS: &[(&str, [u8; 3])] = &[
     ("orch", [30, 32, 35]),
     ("ai", [62, 49, 0]),
     ("dat", [45, 27, 83]),
@@ -108,12 +114,524 @@ const TEAM_COLORS: &[(&str, [u8; 3])] = &[
     ("inp", [45, 45, 45]),
 ];
 
-/// Launch a new squad workspace.
+/// Launch a new squad workspace for the given `PatternConfig`.
+///
+/// `team_agent_override`, when set, wins over `pattern_config`'s own
+/// `TeamOrchestrator { agent }` for the actual agent CLI invoked — this lets
+/// legacy agent kinds with no `AgentKind` equivalent (e.g. `agy`/Antigravity,
+/// still accepted by `parse_startwork_args`) keep working byte-for-byte via
+/// the raw `--agent`/trailing-positional string, while `pattern_config`
+/// still carries a representable `AgentKind` for menus/metadata/env.
 pub async fn launch(
+    name: Option<&str>,
+    number: Option<u32>,
+    no_init: bool,
+    pattern_config: PatternConfig,
+    team_agent_override: Option<&str>,
+) -> Result<()> {
+    let pattern_slug = pattern_config.pattern_slug();
+    match &pattern_config.pattern {
+        patterns::LaunchPattern::TeamOrchestrator { agent } => {
+            let agent_str = team_agent_override.unwrap_or_else(|| agent.as_str());
+            launch_team(name, number, Some(agent_str), no_init, pattern_slug).await
+        }
+        patterns::LaunchPattern::Executor { executor } => {
+            launch_executor(name, number, no_init, executor.clone(), pattern_slug).await
+        }
+        patterns::LaunchPattern::SimpleOrchestrator {
+            orch, worker_model, ..
+        } => {
+            launch_simple(
+                name,
+                number,
+                no_init,
+                &pattern_config,
+                orch,
+                worker_model,
+                pattern_slug,
+            )
+            .await
+        }
+        patterns::LaunchPattern::FixABug { issue, fixer } => {
+            fixbug::launch(name, number, no_init, issue.clone(), fixer.clone()).await
+        }
+    }
+}
+
+/// Launch the Executor pattern: one worktree `executor` pane running the
+/// user-picked model, a non-worktree `advisor` pane (always Fable 5 XHIGH)
+/// sharing the executor's directory, and the usual `inp` input router.
+///
+/// Reuses the same worktree/skill-sync/MCP-registration/agent-registration
+/// helpers `launch_team` uses; only the pane layout (3 panes, not 10) and the
+/// window-def construction are Executor-specific.
+async fn launch_executor(
+    name: Option<&str>,
+    number: Option<u32>,
+    no_init: bool,
+    executor_model: patterns::ModelChoice,
+    pattern_slug: &str,
+) -> Result<()> {
+    let repo = find_git_repo()?;
+    ensure_squad_services();
+    let repo_name = repo
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("workspace")
+        .to_string();
+    let config = crate::config::Config::load()?;
+    let db_pool = crate::db::init_db(&config.database_url).await?;
+
+    let name = name.unwrap_or(&repo_name);
+    let number = match number {
+        Some(n) => n,
+        None => allocate_session_number(&db_pool, &repo, name).await,
+    };
+    let session_id = workspace_session_id(name, number);
+    let worktree_root = repo.join(".claude").join("worktrees").join(&session_id);
+
+    if worktree_root.exists() {
+        anyhow::bail!(
+            "worktree root {} already exists. Pick a different number or clean up manually.",
+            worktree_root.display()
+        );
+    }
+
+    info!(repo = %repo.display(), session = %session_id, "Launching executor-pattern workspace");
+
+    let _ = ensure_antigravity_project_trusted(&repo);
+    let _ = ensure_gemini_project_trusted(&repo);
+
+    // The executor is the only worktree in this pattern; advisor and inp share
+    // its directory (advisor.needs_worktree = false — see patterns::executor()).
+    let executor_worktree =
+        create_orchestrator_worktree(&repo, &worktree_root, &session_id).await?;
+
+    let run_id = format!(
+        "{}-{}",
+        session_id,
+        chrono::Utc::now().format("%Y%m%dT%H%M%SZ")
+    );
+    let runtime_identity = RuntimeIdentityEnv::new(
+        &repo,
+        name,
+        &config.temporal_namespace,
+        DEVORCH_DEFAULT_TASK_QUEUE,
+    );
+
+    // Minimal input router: plain text routes to `executor`; `/advisor <text>`
+    // routes to the advisor pane. Mirrors the team pattern's router script,
+    // trimmed to this pattern's two addressable roles.
+    let router_script_path = format!("/tmp/devorch-input-router-{}.py", session_id);
+    let router_script_content = format!(
+        r#"import sys, os, subprocess, select
+try:
+    import readline
+    readline.set_history_length(100)
+except ImportError:
+    pass
+session = '{session_id}'
+sys.stdout.write(f'\x1b]0;INPUT - {{session}}\x07\x1b]1;INPUT - {{session}}\x07\x1b]2;INPUT - {{session}}\x07')
+sys.stdout.flush()
+print('\x1b[1;36m====================================================\x1b[0m')
+print('\x1b[1;37m                  INPUT ROUTER                     \x1b[0m')
+print('\x1b[1;36m====================================================\x1b[0m')
+print('Type your note. Press Enter to submit (Ctrl-D for multiline).')
+print('Prefix with "/advisor " to route to the advisor pane; default is executor.\n')
+
+def process_cmd(cmd):
+    cmd = cmd.strip()
+    if not cmd:
+        return
+    if cmd.startswith('/advisor '):
+        target_role = 'advisor'
+        actual_cmd = cmd[len('/advisor '):].strip()
+    elif cmd == '/advisor':
+        target_role = 'advisor'
+        actual_cmd = ''
+    else:
+        target_role = 'executor'
+        actual_cmd = cmd
+
+    print(f'\x1b[1;33mRouting note to {{target_role.upper()}}: "{{actual_cmd}}"\x1b[0m')
+
+    env = os.environ.copy()
+    env['DEVORCH_SESSION'] = '{session_id}'
+    env['DEVORCH_RUN_ID'] = '{run_id}'
+    env['DEVORCH_REPO_ID'] = '{repo_id}'
+    env['DEVORCH_REPO_ROOT'] = '{repo_root}'
+    env['DEVORCH_TEMPORAL_NAMESPACE'] = '{temporal_namespace}'
+    env['DEVORCH_TASK_QUEUE'] = '{task_queue}'
+    subprocess.run(['lantern', 'note', target_role, actual_cmd], env=env)
+
+    if actual_cmd:
+        try:
+            import iterm2
+
+            def find_session_by_role(app, session_id, role):
+                parts = session_id.rsplit("-", 1)
+                if len(parts) == 2:
+                    project_slug, slot = parts
+                    target_contains = f"{{project_slug}}-{{role}}-{{slot}}"
+                else:
+                    target_contains = f"{{session_id}}-{{role}}"
+                for w in app.windows:
+                    for t in w.tabs:
+                        for s in t.sessions:
+                            name = s.name or ""
+                            if target_contains in name:
+                                return s
+                return None
+
+            async def inject(connection):
+                app = await iterm2.async_get_app(connection)
+                s = find_session_by_role(app, session, target_role)
+                if s:
+                    await s.async_send_text(actual_cmd)
+                    import asyncio
+                    await asyncio.sleep(0.05)
+                    await s.async_send_text("\r")
+
+            iterm2.run_until_complete(inject)
+        except Exception as e:
+            import sys
+            print(f"Error injecting to iTerm2 pane: {{e}}", file=sys.stderr)
+
+def edit_loop():
+    lines = []
+    while True:
+        try:
+            prompt = '\x1b[1;32m[INPUT] ❯ \x1b[0m' if not lines else '          '
+            line = input(prompt)
+            lines.append(line)
+            if not select.select([sys.stdin], [], [], 0.05)[0]:
+                break
+        except EOFError:
+            break
+        except KeyboardInterrupt:
+            raise
+    return '\n'.join(lines)
+
+try:
+    while True:
+        try:
+            cmd = edit_loop()
+        except (KeyboardInterrupt, EOFError):
+            break
+        if cmd.strip():
+            process_cmd(cmd)
+finally:
+    sys.stdout.write('\r\n')
+    sys.stdout.flush()"#,
+        session_id = session_id,
+        run_id = run_id,
+        repo_id = name,
+        repo_root = runtime_identity.repo_root,
+        temporal_namespace = runtime_identity.temporal_namespace,
+        task_queue = runtime_identity.task_queue,
+    );
+    let _ = std::fs::write(&router_script_path, &router_script_content);
+
+    let advisor_model = patterns::advisor_model();
+
+    let mut window_defs: Vec<WindowDef> = Vec::with_capacity(3);
+
+    // executor pane (worktree)
+    {
+        let role = "executor";
+        let init = if no_init {
+            None
+        } else {
+            Some(format!(
+                "Fetch your initialization instructions by calling the `devorch_get_setup_instructions` MCP tool immediately. Use session={}, role={}, agent={}, repo_id={}, temporal_namespace={}.",
+                session_id, role, executor_model.agent.as_str(), name, runtime_identity.temporal_namespace
+            ))
+        };
+        let env = base_window_env(
+            &runtime_identity,
+            &session_id,
+            &run_id,
+            role,
+            name,
+            number,
+            pattern_slug,
+        );
+        window_defs.push(WindowDef {
+            name: session_id.clone(),
+            label: "EXEC".to_string(),
+            color: (30, 32, 35),
+            dir: executor_worktree.to_string_lossy().to_string(),
+            env,
+            cmd: build_model_agent_command(
+                &executor_model,
+                role,
+                init.as_deref(),
+                Some(&session_id),
+            ),
+            agent_kind: executor_model.agent.as_str().to_string(),
+        });
+    }
+
+    // advisor pane — SAME directory as executor, no worktree of its own.
+    {
+        let role = "advisor";
+        let init = if no_init {
+            None
+        } else {
+            Some(format!(
+                "Fetch your initialization instructions by calling the `devorch_get_setup_instructions` MCP tool immediately. Use session={}, role={}, agent={}, repo_id={}, temporal_namespace={}.",
+                session_id, role, advisor_model.agent.as_str(), name, runtime_identity.temporal_namespace
+            ))
+        };
+        let env = base_window_env(
+            &runtime_identity,
+            &session_id,
+            &run_id,
+            role,
+            name,
+            number,
+            pattern_slug,
+        );
+        window_defs.push(WindowDef {
+            name: format!("{}-advisor", session_id),
+            label: "ADVISOR".to_string(),
+            color: (45, 27, 83),
+            dir: executor_worktree.to_string_lossy().to_string(),
+            env,
+            cmd: build_model_agent_command(&advisor_model, role, init.as_deref(), None),
+            agent_kind: advisor_model.agent.as_str().to_string(),
+        });
+    }
+
+    // inp pane
+    {
+        let role = "input";
+        let env = base_window_env(
+            &runtime_identity,
+            &session_id,
+            &run_id,
+            role,
+            name,
+            number,
+            pattern_slug,
+        );
+        let input_cmd = format!("python3 /tmp/devorch-input-router-{}.py", session_id);
+        window_defs.push(WindowDef {
+            name: format!("{}-inp-{}", name, number),
+            label: "INPUT".to_string(),
+            color: (45, 45, 45),
+            dir: executor_worktree.to_string_lossy().to_string(),
+            env,
+            cmd: input_cmd,
+            agent_kind: "none".to_string(),
+        });
+    }
+
+    sync_skills_parallel(std::slice::from_ref(&executor_worktree)).await;
+    trust_workspaces(std::slice::from_ref(&executor_worktree)).await;
+
+    let unique_agents: std::collections::HashSet<String> = window_defs
+        .iter()
+        .map(|w| w.agent_kind.to_ascii_lowercase())
+        .collect();
+    for agent in &unique_agents {
+        if agent != "kimi" && agent != "none" {
+            ensure_mcp_server_registered(agent);
+        }
+    }
+
+    let titles_by_role = build_titles_by_role(&window_defs);
+    let startup_by_role = build_startup_commands(&window_defs, &session_id);
+    let init_by_role = build_init_by_role(&window_defs, no_init);
+    let iterm_sessions =
+        create_executor_iterm_layout(&session_id, &titles_by_role, &startup_by_role).await?;
+    if iterm_sessions.len() != 3 {
+        anyhow::bail!(
+            "expected 3 iTerm2 sessions for the executor pattern, got {}",
+            iterm_sessions.len()
+        );
+    }
+
+    if !init_by_role.is_empty() {
+        run_batch_init(&session_id, &init_by_role, &iterm_sessions, &titles_by_role).await;
+    }
+
+    for wdef in window_defs.iter() {
+        let role = wdef
+            .env
+            .get("DEVORCH_ROLE")
+            .map(|s| s.as_str())
+            .unwrap_or("unknown");
+        let iterm_session_id = iterm_sessions
+            .get(role)
+            .map(|s| &s[..s.len().min(8)])
+            .unwrap_or("?");
+        println!(
+            "  + {:<32} {} (iterm: {})",
+            wdef.name, wdef.label, iterm_session_id
+        );
+    }
+
+    queries::insert_machine(&db_pool, &config.machine_id).await?;
+    let session = Session {
+        id: session_id.clone(),
+        machine_id: config.machine_id.clone(),
+        project_slug: name.to_string(),
+        slot_number: number as i64,
+        status: "active".to_string(),
+        created_at: chrono::Utc::now(),
+        pattern: pattern_slug.to_string(),
+    };
+    queries::insert_session(&db_pool, &session).await?;
+
+    register_agents_parallel(
+        &db_pool,
+        &session_id,
+        name,
+        number,
+        &window_defs,
+        &iterm_sessions,
+    )
+    .await?;
+
+    println!(
+        "\nWorkspace ready — iTerm2 window opened for session '{}'.",
+        session_id
+    );
+    println!("Executor pane is active. Switch to iTerm2 to begin.");
+
+    Ok(())
+}
+
+/// Build the CLI invocation for a pattern-selected `ModelChoice` (executor /
+/// advisor / simple / fixbug panes). Unlike `build_agent_command` (which
+/// derives the model from a fixed team-role lookup table), this launches the
+/// exact model the user picked from the pattern menus.
+fn build_model_agent_command(
+    model: &patterns::ModelChoice,
+    _role: &str,
+    init: Option<&str>,
+    pane_name: Option<&str>,
+) -> String {
+    let suffix = init
+        .map(|s| format!(" {}", shell_escape(s)))
+        .unwrap_or_default();
+    match model.agent {
+        patterns::AgentKind::Claude => {
+            let name_arg = pane_name
+                .map(|n| format!(" --name {}", shell_escape(n)))
+                .unwrap_or_default();
+            format!(
+                "claude --model {} --dangerously-skip-permissions{}{}",
+                model.model_id, name_arg, suffix
+            )
+        }
+        patterns::AgentKind::Codex => {
+            let remote = pane_name
+                .map(|n| {
+                    format!(
+                        "--remote {} ",
+                        shell_escape(&format!("unix://codex-devorch-sockets/{}.sock", n))
+                    )
+                })
+                .unwrap_or_default();
+            let cd_arg = if pane_name.is_some() {
+                "--cd \"$workdir\" "
+            } else {
+                ""
+            };
+            let codex_cmd = format!(
+                "codex {}{}--model {} -c 'model_reasoning_effort=\"{}\"' -c shell_environment_policy.inherit=all --dangerously-bypass-approvals-and-sandbox{}",
+                remote, cd_arg, model.model_id, model.effort, suffix
+            );
+            if let Some(name) = pane_name {
+                codex_app_server_wrapper(name, &codex_cmd)
+            } else {
+                codex_cmd
+            }
+        }
+        patterns::AgentKind::Gemini => {
+            // Gemini-family models launch through the Antigravity CLI (`agy`),
+            // selected by display name via ANTIGRAVITY_MODEL — same convention
+            // as `build_agent_command`'s "agy" arm.
+            let prompt_arg = init
+                .map(|s| format!(" --prompt-interactive {}", shell_escape(s)))
+                .unwrap_or_default();
+            format!(
+                "env -u TERM_PROGRAM -u ITERM_SESSION_ID -u TERM_PROGRAM_VERSION ANTIGRAVITY_MODEL={} agy --dangerously-skip-permissions{}",
+                shell_escape(model.antigravity_model()),
+                prompt_arg
+            )
+        }
+        patterns::AgentKind::Kimi | patterns::AgentKind::Goose => {
+            format!(
+                "claude --model {} --dangerously-skip-permissions{}",
+                model.model_id, suffix
+            )
+        }
+    }
+}
+
+/// Open the 3-pane Executor layout (executor/advisor/inp) via
+/// `iterm_executor.py`. Mirrors `create_iterm_layout`'s file-handoff protocol.
+async fn create_executor_iterm_layout(
+    session_id: &str,
+    titles_by_role: &std::collections::HashMap<String, String>,
+    startup_by_role: &std::collections::HashMap<String, String>,
+) -> Result<std::collections::HashMap<String, String>> {
+    let script_path = crate::terminal::locate_script("iterm_executor.py")?;
+
+    let startup_file = format!("/tmp/devorch-iterm-startup-{}.json", session_id);
+    let titles_file = format!("/tmp/devorch-iterm-titles-{}.json", session_id);
+    std::fs::write(
+        &startup_file,
+        serde_json::to_string(startup_by_role).context("serialize startup commands")?,
+    )?;
+    std::fs::write(
+        &titles_file,
+        serde_json::to_string(titles_by_role).context("serialize pane titles")?,
+    )?;
+
+    let cmd_args = [
+        script_path.to_str().context("non-UTF-8 script path")?,
+        "--session",
+        session_id,
+        "--titles-file",
+        &titles_file,
+        "--startup-file",
+        &startup_file,
+    ];
+
+    let output = Command::new("python3")
+        .args(cmd_args)
+        .output()
+        .await
+        .context("failed to launch iterm_executor.py")?;
+
+    let _ = std::fs::remove_file(&startup_file);
+    let _ = std::fs::remove_file(&titles_file);
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        anyhow::bail!("iterm_executor.py failed: {}", stderr.trim());
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let map: std::collections::HashMap<String, String> = serde_json::from_str(stdout.trim())
+        .with_context(|| format!("iterm_executor.py returned invalid JSON: {}", stdout.trim()))?;
+    Ok(map)
+}
+
+/// Launch a new squad workspace using the legacy 4x2+1 team grid.
+///
+/// This is byte-identical to the pre-pattern `startwork` behavior; `launch()`
+/// above dispatches into it for `LaunchPattern::TeamOrchestrator`.
+async fn launch_team(
     name: Option<&str>,
     number: Option<u32>,
     agent_kind: Option<&str>,
     no_init: bool,
+    pattern_slug: &str,
 ) -> Result<()> {
     let repo = find_git_repo()?;
     ensure_squad_services();
@@ -157,6 +675,7 @@ pub async fn launch(
             &worktree_root,
             &config,
             &db_pool,
+            pattern_slug,
         )
         .await;
     }
@@ -332,6 +851,7 @@ finally:
         &session_id,
         &run_id,
         &runtime_identity,
+        pattern_slug,
     );
 
     // Skills + MCP: sync all roots concurrently (blocking I/O off the async runtime).
@@ -361,8 +881,18 @@ finally:
     let titles_by_role = build_titles_by_role(&window_defs);
     let startup_by_role = build_startup_commands(&window_defs, &session_id);
     let init_by_role = build_init_by_role(&window_defs, no_init);
-    let iterm_sessions =
-        create_iterm_layout(&session_id, &titles_by_role, &startup_by_role).await?;
+    // The team layout is fixed regardless of agent kind — any `AgentKind` here
+    // yields the same `LayoutSpec`/pane count (agent only affects per-role
+    // model metadata, unused for geometry).
+    let team_layout = PatternConfig::team(patterns::AgentKind::Claude);
+    let iterm_sessions = create_iterm_layout(
+        &session_id,
+        &titles_by_role,
+        &startup_by_role,
+        &team_layout.layout,
+        team_layout.pane_count(),
+    )
+    .await?;
     if iterm_sessions.len() != GRID_ORDER.len() {
         anyhow::bail!(
             "expected {} iTerm2 sessions, got {}",
@@ -410,6 +940,7 @@ finally:
         slot_number: number as i64,
         status: "active".to_string(),
         created_at: chrono::Utc::now(),
+        pattern: pattern_slug.to_string(),
     };
     queries::insert_session(&db_pool, &session).await?;
 
@@ -440,6 +971,553 @@ finally:
     Ok(())
 }
 
+/// Launch a Simple Orchestrator squad: one orchestrator worktree + N worker
+/// worktrees (`<name>-worker-<i>-<number>`), panes laid out per
+/// `pattern_config.layout`. All workers share `worker_model`; the
+/// orchestrator uses `orch`. Mirrors `launch_team`'s worktree/registration
+/// pipeline but is pane-count-generic instead of hardcoded to `GRID_ORDER`.
+#[allow(clippy::too_many_arguments)]
+async fn launch_simple(
+    name: Option<&str>,
+    number: Option<u32>,
+    no_init: bool,
+    pattern_config: &PatternConfig,
+    orch: &ModelChoice,
+    worker_model: &ModelChoice,
+    pattern_slug: &str,
+) -> Result<()> {
+    let repo = find_git_repo()?;
+    ensure_squad_services();
+    let repo_name = repo
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("workspace")
+        .to_string();
+    let config = crate::config::Config::load()?;
+    let db_pool = crate::db::init_db(&config.database_url).await?;
+
+    let name = name.unwrap_or(&repo_name);
+    let number = match number {
+        Some(n) => n,
+        None => allocate_session_number(&db_pool, &repo, name).await,
+    };
+    let session_id = workspace_session_id(name, number);
+    let worktree_root = repo.join(".claude").join("worktrees").join(&session_id);
+
+    if worktree_root.exists() {
+        anyhow::bail!(
+            "worktree root {} already exists. Pick a different number or clean up manually.",
+            worktree_root.display()
+        );
+    }
+
+    info!(repo = %repo.display(), session = %session_id, "Launching simple-orchestrator squad workspace");
+
+    let _ = ensure_antigravity_project_trusted(&repo);
+    let _ = ensure_gemini_project_trusted(&repo);
+
+    let worker_count = pattern_config
+        .roles
+        .iter()
+        .filter(|r| r.role.starts_with("worker-"))
+        .count() as u8;
+
+    // 1. Create worktrees in parallel: orchestrator + N workers.
+    let orchestrator_worktree =
+        create_orchestrator_worktree(&repo, &worktree_root, &session_id).await?;
+    let _worker_records =
+        create_simple_worker_worktrees_parallel(&repo, &worktree_root, name, number, worker_count)
+            .await?;
+
+    let run_id = format!(
+        "{}-{}",
+        session_id,
+        chrono::Utc::now().format("%Y%m%dT%H%M%SZ")
+    );
+
+    let runtime_identity = RuntimeIdentityEnv::new(
+        &repo,
+        name,
+        &config.temporal_namespace,
+        DEVORCH_DEFAULT_TASK_QUEUE,
+    );
+
+    // Input router: routes to `orch` by default, or `/worker-<i> ...` to a
+    // specific worker pane.
+    let worker_roles: Vec<String> = (1..=worker_count).map(|i| format!("worker-{i}")).collect();
+    let router_script_path = format!("/tmp/devorch-input-router-{}.py", session_id);
+    let router_script_content = build_simple_input_router_script(
+        &session_id,
+        &run_id,
+        name,
+        &runtime_identity,
+        &worker_roles,
+    );
+    let _ = std::fs::write(&router_script_path, &router_script_content);
+
+    // 2. Build per-pane structural configs from the pattern's RoleSpecs.
+    let window_defs = build_simple_window_defs(
+        &worktree_root,
+        &orchestrator_worktree,
+        no_init,
+        name,
+        number,
+        &session_id,
+        &run_id,
+        &runtime_identity,
+        pattern_slug,
+        pattern_config,
+    );
+
+    // Skills + MCP: sync all roots concurrently (blocking I/O off the async runtime).
+    let skill_roots: Vec<PathBuf> = window_defs
+        .iter()
+        .map(|w| PathBuf::from(&w.dir))
+        .collect::<std::collections::HashSet<_>>()
+        .into_iter()
+        .collect();
+    sync_skills_parallel(&skill_roots).await;
+    trust_workspaces(&skill_roots).await;
+
+    let unique_agents: std::collections::HashSet<String> = window_defs
+        .iter()
+        .map(|w| w.agent_kind.to_ascii_lowercase())
+        .collect();
+    if unique_agents.contains("kimi") {
+        kill_toad_processes();
+        ensure_devorch_mcp_ready().await?;
+    }
+    for agent in &unique_agents {
+        if agent != "kimi" && agent != "none" {
+            ensure_mcp_server_registered(agent);
+        }
+    }
+
+    // 3. Build per-pane startup commands, then create layout and inject in one Python session.
+    let titles_by_role = build_titles_by_role(&window_defs);
+    let startup_by_role = build_startup_commands(&window_defs, &session_id);
+    let init_by_role = build_init_by_role(&window_defs, no_init);
+    let iterm_sessions = create_iterm_layout_for_pattern(
+        &session_id,
+        &pattern_config.layout,
+        &titles_by_role,
+        &startup_by_role,
+    )
+    .await?;
+    if iterm_sessions.len() != pattern_config.pane_count() {
+        anyhow::bail!(
+            "expected {} iTerm2 sessions, got {}",
+            pattern_config.pane_count(),
+            iterm_sessions.len()
+        );
+    }
+
+    if !init_by_role.is_empty() {
+        run_batch_init(&session_id, &init_by_role, &iterm_sessions, &titles_by_role).await;
+    }
+
+    for wdef in window_defs.iter() {
+        let role = wdef
+            .env
+            .get("DEVORCH_ROLE")
+            .map(|s| s.as_str())
+            .unwrap_or("unknown");
+        let iterm_key = iterm_role_key(role);
+        let iterm_session_id = iterm_sessions
+            .get(iterm_key)
+            .map(|s| &s[..s.len().min(8)])
+            .unwrap_or("?");
+        println!(
+            "  + {:<32} {} (iterm: {})",
+            wdef.name, wdef.label, iterm_session_id
+        );
+    }
+
+    // 5. Register with Relay DB.
+    queries::insert_machine(&db_pool, &config.machine_id).await?;
+
+    let session = Session {
+        id: session_id.clone(),
+        machine_id: config.machine_id.clone(),
+        project_slug: name.to_string(),
+        slot_number: number as i64,
+        status: "active".to_string(),
+        created_at: chrono::Utc::now(),
+        pattern: pattern_slug.to_string(),
+    };
+    queries::insert_session(&db_pool, &session).await?;
+
+    register_agents_parallel(
+        &db_pool,
+        &session_id,
+        name,
+        number,
+        &window_defs,
+        &iterm_sessions,
+    )
+    .await?;
+
+    surface_codex_launch_errors(&db_pool, &session_id, &window_defs, &iterm_sessions).await?;
+
+    println!(
+        "\nWorkspace ready — iTerm2 window opened for session '{}'.",
+        session_id
+    );
+    println!(
+        "Orch pane is active ({} workers: {} — model {}). Switch to iTerm2 to begin.",
+        worker_count, worker_model.label, orch.label
+    );
+
+    Ok(())
+}
+
+/// Create N worker worktrees concurrently for the Simple Orchestrator
+/// pattern, named `<name>-worker-<i>-<number>` (mirrors
+/// `create_worker_worktrees_parallel`'s team-role variant but over
+/// `worker-1..=N` instead of the fixed `GRID_ORDER` team roles).
+async fn create_simple_worker_worktrees_parallel(
+    repo: &Path,
+    worktree_root: &Path,
+    name: &str,
+    number: u32,
+    workers: u8,
+) -> Result<Vec<(String, String, PathBuf, String)>> {
+    let repo_str = repo.to_string_lossy().to_string();
+    let mut set = JoinSet::new();
+    for i in 1..=workers {
+        let team = format!("worker-{i}");
+        let repo_str = repo_str.clone();
+        let worktree_root = worktree_root.to_path_buf();
+        let name = name.to_string();
+        set.spawn(async move {
+            create_one_worker_worktree(&repo_str, &worktree_root, &name, &team, number).await
+        });
+    }
+    let mut records = Vec::with_capacity(workers as usize);
+    while let Some(res) = set.join_next().await {
+        records.push(res.context("worktree task join")??);
+    }
+    records.sort_by(|a, b| a.0.cmp(&b.0));
+    Ok(records)
+}
+
+/// Build one `WindowDef` per `RoleSpec` in `pattern_config.roles` — generic
+/// over pane count, unlike `build_window_defs` (which walks the fixed
+/// `GRID_ORDER`).
+#[allow(clippy::too_many_arguments)]
+fn build_simple_window_defs(
+    worktree_root: &Path,
+    orchestrator_worktree: &Path,
+    no_init: bool,
+    name: &str,
+    number: u32,
+    workspace_session: &str,
+    run_id: &str,
+    runtime_identity: &RuntimeIdentityEnv,
+    pattern_slug: &str,
+    pattern_config: &PatternConfig,
+) -> Vec<WindowDef> {
+    let mut defs = Vec::with_capacity(pattern_config.roles.len());
+    for role_spec in &pattern_config.roles {
+        let role = role_spec.role.as_str();
+        let agent_kind_str = role_spec.model.agent.as_str();
+        let env = base_window_env(
+            runtime_identity,
+            workspace_session,
+            run_id,
+            role,
+            name,
+            number,
+            pattern_slug,
+        );
+
+        if role == "inp" {
+            let pane_name = format!("{}-inp-{}", name, number);
+            defs.push(WindowDef {
+                name: pane_name,
+                label: role_spec.label.clone(),
+                color: role_spec.color,
+                dir: orchestrator_worktree.to_string_lossy().to_string(),
+                env,
+                cmd: format!("python3 /tmp/devorch-input-router-{}.py", workspace_session),
+                agent_kind: "none".to_string(),
+            });
+            continue;
+        }
+
+        let (pane_name, dir) = if role == "orch" {
+            (
+                workspace_session.to_string(),
+                orchestrator_worktree.to_string_lossy().to_string(),
+            )
+        } else {
+            let leaf = pane_name_for(name, role, number);
+            (
+                leaf.clone(),
+                worktree_root.join(&leaf).to_string_lossy().to_string(),
+            )
+        };
+
+        let init = if no_init {
+            None
+        } else {
+            Some(format!(
+                "Fetch your initialization instructions by calling the `devorch_get_setup_instructions` MCP tool immediately. Use session={}, role={}, agent={}, repo_id={}, temporal_namespace={}.",
+                workspace_session, role, agent_kind_str, name, runtime_identity.temporal_namespace
+            ))
+        };
+
+        defs.push(WindowDef {
+            name: pane_name.clone(),
+            label: role_spec.label.clone(),
+            color: role_spec.color,
+            dir,
+            env,
+            cmd: build_pattern_agent_command(&role_spec.model, init.as_deref(), Some(&pane_name)),
+            agent_kind: agent_kind_str.to_string(),
+        });
+    }
+    defs
+}
+
+/// Build the CLI invocation for a `ModelChoice` (Simple Orchestrator's
+/// orch/worker panes) — same shape as `build_agent_command`, but keyed on the
+/// explicit `AgentKind`/`model_id`/`effort` from the pattern menu instead of
+/// team's role-name → model lookup tables.
+fn build_pattern_agent_command(
+    model: &ModelChoice,
+    init: Option<&str>,
+    pane_name: Option<&str>,
+) -> String {
+    let suffix = init
+        .map(|s| format!(" {}", shell_escape(s)))
+        .unwrap_or_default();
+    match model.agent {
+        AgentKind::Claude => {
+            let name_arg = pane_name
+                .map(|n| format!(" --name {}", shell_escape(n)))
+                .unwrap_or_default();
+            format!(
+                "claude --model {} --dangerously-skip-permissions{}{}",
+                model.model_id, name_arg, suffix
+            )
+        }
+        AgentKind::Codex => {
+            let remote = pane_name
+                .map(|n| {
+                    format!(
+                        "--remote {} ",
+                        shell_escape(&format!("unix://codex-devorch-sockets/{}.sock", n))
+                    )
+                })
+                .unwrap_or_default();
+            let cd_arg = if pane_name.is_some() {
+                "--cd \"$workdir\" "
+            } else {
+                ""
+            };
+            let codex_cmd = format!(
+                "codex {}{}--model {} -c 'model_reasoning_effort=\"{}\"' -c shell_environment_policy.inherit=all --dangerously-bypass-approvals-and-sandbox{}",
+                remote, cd_arg, model.model_id, model.effort, suffix
+            );
+            if let Some(name) = pane_name {
+                codex_app_server_wrapper(name, &codex_cmd)
+            } else {
+                codex_cmd
+            }
+        }
+        AgentKind::Gemini => {
+            // Gemini-family models ride the Antigravity (`agy`) CLI, which
+            // selects models by display name via ANTIGRAVITY_MODEL, matching
+            // `build_agent_command`'s "agy" arm.
+            let prompt_arg = init
+                .map(|s| format!(" --prompt-interactive {}", shell_escape(s)))
+                .unwrap_or_default();
+            format!(
+                "env -u TERM_PROGRAM -u ITERM_SESSION_ID -u TERM_PROGRAM_VERSION ANTIGRAVITY_MODEL={} agy --dangerously-skip-permissions{}",
+                shell_escape(model.antigravity_model()),
+                prompt_arg
+            )
+        }
+        AgentKind::Kimi => {
+            let mcp_cfg = devorch_mcp_config_path();
+            format!(
+                "command env -u TERM_PROGRAM -u ITERM_SESSION_ID -u TERM_PROGRAM_VERSION PATH={}:{}:$PATH kimi --mcp-config-file {} -m {} -y",
+                shell_escape("/opt/homebrew/bin"),
+                shell_escape(&dirs::home_dir().unwrap().join(".local/bin").to_string_lossy()),
+                shell_escape(&mcp_cfg.to_string_lossy()),
+                shell_escape(&model.model_id)
+            )
+        }
+        AgentKind::Goose => {
+            let provider = crate::delivery::acp::goose_provider_for_agent("claude");
+            let name_arg = pane_name
+                .map(|n| format!(" --name {}", shell_escape(n)))
+                .unwrap_or_default();
+            format!(
+                "env -u TERM_PROGRAM -u ITERM_SESSION_ID -u TERM_PROGRAM_VERSION \
+                 GOOSE_PROVIDER={} GOOSE_MODEL={} GOOSE_DISABLE_KEYRING=1 \
+                 goose session{} --with-extension {}",
+                provider,
+                model.model_id,
+                name_arg,
+                shell_escape(&crate::delivery::acp::devorch_extension_value()),
+            )
+        }
+    }
+}
+
+/// Python input router for the Simple Orchestrator pattern: routes free-text
+/// to `orch` by default, or `/worker-<i> <cmd>` to a specific worker pane.
+/// Same shape as `launch_team`'s inline router script, parameterized over the
+/// dynamic worker role list instead of the fixed team roles.
+fn build_simple_input_router_script(
+    session_id: &str,
+    run_id: &str,
+    repo_id: &str,
+    runtime_identity: &RuntimeIdentityEnv,
+    worker_roles: &[String],
+) -> String {
+    let worker_roles_py = worker_roles
+        .iter()
+        .map(|r| format!("'{}'", r))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let worker_roles_display = worker_roles.join(", ");
+    format!(
+        r#"import sys, os, subprocess, select
+try:
+    import readline
+    readline.set_history_length(100)
+except ImportError:
+    pass
+session = '{session_id}'
+sys.stdout.write(f'\x1b]0;INPUT - {{session}}\x07\x1b]1;INPUT - {{session}}\x07\x1b]2;INPUT - {{session}}\x07')
+sys.stdout.flush()
+print('\x1b[1;36m====================================================\x1b[0m')
+print('\x1b[1;37m           SIMPLE ORCHESTRATOR INPUT ROUTER        \x1b[0m')
+print('\x1b[1;36m====================================================\x1b[0m')
+print('Type your note or command. Press Enter to submit.')
+print('  - Arrow keys and backspace work for editing.')
+print('  - For multiline, type or paste lines then press Ctrl-D to submit.')
+print('  - Ctrl-C aborts current input.')
+print('Type "/<role> <command>" to route to a specific worker window.')
+print('  (Available roles: {worker_roles_display})\n')
+
+worker_roles = [{worker_roles_py}]
+
+def process_cmd(cmd):
+    cmd = cmd.strip()
+    if not cmd:
+        return
+    matched_worker = None
+    for role in worker_roles:
+        if cmd.startswith(f'/{{role}} '):
+            matched_worker = role
+            actual_cmd = cmd[len(role) + 2:].strip()
+            break
+        elif cmd == f'/{{role}}':
+            matched_worker = role
+            actual_cmd = ""
+            break
+
+    if matched_worker:
+        target_role = matched_worker
+        role_label = matched_worker.upper()
+    else:
+        target_role = 'orch'
+        actual_cmd = cmd
+        role_label = 'ORCH'
+
+    print(f'\x1b[1;33mRouting note to {{role_label}}: "{{actual_cmd}}"\x1b[0m')
+
+    env = os.environ.copy()
+    env['DEVORCH_SESSION'] = '{session_id}'
+    env['DEVORCH_RUN_ID'] = '{run_id}'
+    env['DEVORCH_REPO_ID'] = '{repo_id}'
+    env['DEVORCH_REPO_ROOT'] = '{repo_root}'
+    env['DEVORCH_TEMPORAL_NAMESPACE'] = '{temporal_namespace}'
+    env['DEVORCH_TASK_QUEUE'] = '{task_queue}'
+
+    subprocess.run(['lantern', 'note', target_role, actual_cmd], env=env)
+
+    # Inject the note directly into the active iTerm2 terminal pane
+    if actual_cmd:
+        try:
+            import iterm2
+
+            def find_session_by_role(app, session_id, role):
+                if role == "orch":
+                    target_contains = "ORCH - " + session_id
+                else:
+                    parts = session_id.rsplit("-", 1)
+                    if len(parts) == 2:
+                        project_slug, slot = parts
+                        target_contains = f"{{project_slug}}-{{role}}-{{slot}}"
+                    else:
+                        target_contains = f"{{session_id}}-{{role}}"
+                for w in app.windows:
+                    for t in w.tabs:
+                        for s in t.sessions:
+                            name = s.name or ""
+                            if target_contains in name:
+                                return s
+                return None
+
+            async def inject(connection):
+                app = await iterm2.async_get_app(connection)
+                s = find_session_by_role(app, session, target_role)
+                if s:
+                    await s.async_send_text(actual_cmd)
+                    import asyncio
+                    await asyncio.sleep(0.05)
+                    await s.async_send_text("\r")
+
+            iterm2.run_until_complete(inject)
+        except Exception as e:
+            import sys
+            print(f"Error injecting to iTerm2 pane: {{e}}", file=sys.stderr)
+
+def edit_loop():
+    lines = []
+    while True:
+        try:
+            prompt = '\x1b[1;32m[INPUT] ❯ \x1b[0m' if not lines else '          '
+            line = input(prompt)
+            lines.append(line)
+            # If no more input arrives within 50 ms (single line typed), submit now.
+            # Multiline paste fills the buffer immediately so select returns True.
+            if not select.select([sys.stdin], [], [], 0.05)[0]:
+                break
+        except EOFError:
+            # Ctrl-D: submit whatever has been collected
+            break
+        except KeyboardInterrupt:
+            raise
+    return '\n'.join(lines)
+
+try:
+    while True:
+        try:
+            cmd = edit_loop()
+        except (KeyboardInterrupt, EOFError):
+            break
+        if cmd.strip():
+            process_cmd(cmd)
+finally:
+    sys.stdout.write('\r\n')
+    sys.stdout.flush()"#,
+        session_id = session_id,
+        run_id = run_id,
+        repo_id = repo_id,
+        repo_root = runtime_identity.repo_root,
+        temporal_namespace = runtime_identity.temporal_namespace,
+        task_queue = runtime_identity.task_queue,
+        worker_roles_py = worker_roles_py,
+        worker_roles_display = worker_roles_display,
+    )
+}
+
 /// Launch the SOLO GOOSE model: ONE headed, full-featured native `goose session`
 /// in its own worktree, for focused fixes.
 ///
@@ -453,6 +1531,7 @@ finally:
 ///   repo's no-secrets model).
 /// - beads is available via the shell. `stopwork` closes the window and removes
 ///   the worktree/branch.
+#[allow(clippy::too_many_arguments)]
 async fn launch_solo_goose(
     repo: &Path,
     name: &str,
@@ -461,6 +1540,7 @@ async fn launch_solo_goose(
     worktree_root: &Path,
     config: &crate::config::Config,
     db_pool: &sqlx::SqlitePool,
+    pattern_slug: &str,
 ) -> Result<()> {
     let _ = ensure_antigravity_project_trusted(repo);
     let _ = ensure_gemini_project_trusted(repo);
@@ -489,6 +1569,7 @@ async fn launch_solo_goose(
         slot_number: number as i64,
         status: "active".to_string(),
         created_at: chrono::Utc::now(),
+        pattern: pattern_slug.to_string(),
     };
     queries::insert_session(db_pool, &session).await?;
     let agent = Agent {
@@ -607,6 +1688,7 @@ fn base_window_env(
     role: &str,
     name: &str,
     number: u32,
+    pattern_slug: &str,
 ) -> std::collections::HashMap<String, String> {
     let mut env = std::collections::HashMap::new();
     env.insert("DEVORCH_SESSION".to_string(), workspace_session.to_string());
@@ -614,6 +1696,7 @@ fn base_window_env(
     env.insert("DEVORCH_ROLE".to_string(), role.to_string());
     env.insert("DEVORCH_PROJECT_SLUG".to_string(), name.to_string());
     env.insert("DEVORCH_SLOT".to_string(), number.to_string());
+    env.insert("DEVORCH_PATTERN".to_string(), pattern_slug.to_string());
     // Local self-contained backend — no remote Temporal or remote DB.
     env.insert(
         "DEVORCH_TEMPORAL_ADDRESS".to_string(),
@@ -649,6 +1732,7 @@ fn build_window_defs(
     workspace_session: &str,
     run_id: &str,
     runtime_identity: &RuntimeIdentityEnv,
+    pattern_slug: &str,
 ) -> Vec<WindowDef> {
     let mut defs = Vec::new();
     for grid_team in GRID_ORDER {
@@ -670,6 +1754,7 @@ fn build_window_defs(
                 role,
                 name,
                 number,
+                pattern_slug,
             );
             defs.push(WindowDef {
                 name: workspace_session.to_string(),
@@ -694,6 +1779,7 @@ fn build_window_defs(
                 role,
                 name,
                 number,
+                pattern_slug,
             );
             let (r, g, b) = team_color(grid_team);
             let input_cmd = format!("python3 /tmp/devorch-input-router-{}.py", workspace_session);
@@ -726,6 +1812,7 @@ fn build_window_defs(
                 role,
                 name,
                 number,
+                pattern_slug,
             );
             let (r, g, b) = team_color(grid_team);
             defs.push(WindowDef {
@@ -1686,6 +2773,14 @@ async fn run_batch_init(
     }
 }
 
+/// Payload written to the `--startup-file` JSON: per-role shell commands plus
+/// the `LayoutSpec` describing the pane grid `iterm_launch.py` should build.
+#[derive(serde::Serialize)]
+struct ItermStartupPayload<'a> {
+    commands: &'a std::collections::HashMap<String, String>,
+    layout: &'a patterns::LayoutSpec,
+}
+
 // Create the squad layout in a new iTerm2 window using the Python API.
 // Calls `src/startwork/iterm_launch.py` which opens the window, injects startup
 // commands into each pane on the same connection, and returns session IDs.
@@ -1693,14 +2788,20 @@ async fn create_iterm_layout(
     session_id: &str,
     titles_by_role: &std::collections::HashMap<String, String>,
     startup_by_role: &std::collections::HashMap<String, String>,
+    layout: &patterns::LayoutSpec,
+    expected_panes: usize,
 ) -> Result<std::collections::HashMap<String, String>> {
     let script_path = crate::terminal::locate_script("iterm_launch.py")?;
 
     let startup_file = format!("/tmp/devorch-iterm-startup-{}.json", session_id);
     let titles_file = format!("/tmp/devorch-iterm-titles-{}.json", session_id);
+    let startup_payload = ItermStartupPayload {
+        commands: startup_by_role,
+        layout,
+    };
     std::fs::write(
         &startup_file,
-        serde_json::to_string(startup_by_role).context("serialize startup commands")?,
+        serde_json::to_string(&startup_payload).context("serialize startup commands and layout")?,
     )?;
     std::fs::write(
         &titles_file,
@@ -1735,14 +2836,83 @@ async fn create_iterm_layout(
     let map: std::collections::HashMap<String, String> = serde_json::from_str(stdout.trim())
         .with_context(|| format!("iterm_launch.py returned invalid JSON: {}", stdout.trim()))?;
 
-    // Verify we got at least 10 sessions
-    if map.len() < 10 {
+    // Verify we got exactly the number of sessions this pattern's layout expects.
+    if map.len() != expected_panes {
         anyhow::bail!(
-            "iterm_launch.py returned only {} sessions (expected 10): {:?}",
+            "iterm_launch.py returned {} sessions (expected {}): {:?}",
             map.len(),
+            expected_panes,
             map
         );
     }
+
+    Ok(map)
+}
+
+/// Create a pane layout for a non-team `LaunchPattern` (Simple Orchestrator
+/// today; Executor/FixABug can reuse this too) from its `LayoutSpec`. Unlike
+/// `create_iterm_layout` (fixed 9-pane `GRID_ORDER` grid), this calls
+/// `iterm_launch_pattern.py`, which builds columns/rows generically off the
+/// `LayoutSpec` JSON instead of a hardcoded split tree.
+async fn create_iterm_layout_for_pattern(
+    session_id: &str,
+    layout: &patterns::LayoutSpec,
+    titles_by_role: &std::collections::HashMap<String, String>,
+    startup_by_role: &std::collections::HashMap<String, String>,
+) -> Result<std::collections::HashMap<String, String>> {
+    let script_path = crate::terminal::locate_script("iterm_launch_pattern.py")?;
+
+    let layout_file = format!("/tmp/devorch-iterm-layout-{}.json", session_id);
+    let startup_file = format!("/tmp/devorch-iterm-startup-{}.json", session_id);
+    let titles_file = format!("/tmp/devorch-iterm-titles-{}.json", session_id);
+    std::fs::write(
+        &layout_file,
+        serde_json::to_string(layout).context("serialize layout spec")?,
+    )?;
+    std::fs::write(
+        &startup_file,
+        serde_json::to_string(startup_by_role).context("serialize startup commands")?,
+    )?;
+    std::fs::write(
+        &titles_file,
+        serde_json::to_string(titles_by_role).context("serialize pane titles")?,
+    )?;
+
+    let cmd_args = [
+        script_path.to_str().context("non-UTF-8 script path")?,
+        "--session",
+        session_id,
+        "--layout-file",
+        &layout_file,
+        "--titles-file",
+        &titles_file,
+        "--startup-file",
+        &startup_file,
+    ];
+
+    let output = Command::new("python3")
+        .args(cmd_args)
+        .output()
+        .await
+        .context("failed to launch iterm_launch_pattern.py")?;
+
+    let _ = std::fs::remove_file(&layout_file);
+    let _ = std::fs::remove_file(&startup_file);
+    let _ = std::fs::remove_file(&titles_file);
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        anyhow::bail!("iterm_launch_pattern.py failed: {}", stderr.trim());
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let map: std::collections::HashMap<String, String> = serde_json::from_str(stdout.trim())
+        .with_context(|| {
+            format!(
+                "iterm_launch_pattern.py returned invalid JSON: {}",
+                stdout.trim()
+            )
+        })?;
 
     Ok(map)
 }
@@ -2390,6 +3560,7 @@ mod parse_tests {
             "demo-7",
             "run-1",
             &runtime_identity,
+            "team",
         );
 
         assert_eq!(defs.len(), super::GRID_ORDER.len());
@@ -2438,6 +3609,7 @@ mod parse_tests {
             "demo-7",
             "run-1",
             &runtime_identity,
+            "team",
         );
 
         let orch = defs

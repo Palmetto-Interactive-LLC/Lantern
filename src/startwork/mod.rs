@@ -20,6 +20,7 @@ use tracing::{info, warn};
 use crate::db::queries;
 use crate::types::{generate_id, Agent, Session, TerminalTarget};
 
+mod fixbug;
 pub mod menu;
 pub mod patterns;
 
@@ -144,10 +145,8 @@ pub async fn launch(
                 "--pattern simple is not implemented yet in this build (Phase 1 foundation only)"
             )
         }
-        patterns::LaunchPattern::FixABug { .. } => {
-            anyhow::bail!(
-                "--pattern fixbug is not implemented yet in this build (Phase 1 foundation only)"
-            )
+        patterns::LaunchPattern::FixABug { issue, fixer } => {
+            fixbug::launch(name, number, no_init, issue.clone(), fixer.clone()).await
         }
     }
 }

@@ -411,8 +411,18 @@ finally:
     let titles_by_role = build_titles_by_role(&window_defs);
     let startup_by_role = build_startup_commands(&window_defs, &session_id);
     let init_by_role = build_init_by_role(&window_defs, no_init);
-    let iterm_sessions =
-        create_iterm_layout(&session_id, &titles_by_role, &startup_by_role).await?;
+    // The team layout is fixed regardless of agent kind — any `AgentKind` here
+    // yields the same `LayoutSpec`/pane count (agent only affects per-role
+    // model metadata, unused for geometry).
+    let team_layout = PatternConfig::team(patterns::AgentKind::Claude);
+    let iterm_sessions = create_iterm_layout(
+        &session_id,
+        &titles_by_role,
+        &startup_by_role,
+        &team_layout.layout,
+        team_layout.pane_count(),
+    )
+    .await?;
     if iterm_sessions.len() != GRID_ORDER.len() {
         anyhow::bail!(
             "expected {} iTerm2 sessions, got {}",
@@ -1746,6 +1756,14 @@ async fn run_batch_init(
     }
 }
 
+/// Payload written to the `--startup-file` JSON: per-role shell commands plus
+/// the `LayoutSpec` describing the pane grid `iterm_launch.py` should build.
+#[derive(serde::Serialize)]
+struct ItermStartupPayload<'a> {
+    commands: &'a std::collections::HashMap<String, String>,
+    layout: &'a patterns::LayoutSpec,
+}
+
 // Create the squad layout in a new iTerm2 window using the Python API.
 // Calls `src/startwork/iterm_launch.py` which opens the window, injects startup
 // commands into each pane on the same connection, and returns session IDs.
@@ -1753,14 +1771,20 @@ async fn create_iterm_layout(
     session_id: &str,
     titles_by_role: &std::collections::HashMap<String, String>,
     startup_by_role: &std::collections::HashMap<String, String>,
+    layout: &patterns::LayoutSpec,
+    expected_panes: usize,
 ) -> Result<std::collections::HashMap<String, String>> {
     let script_path = crate::terminal::locate_script("iterm_launch.py")?;
 
     let startup_file = format!("/tmp/devorch-iterm-startup-{}.json", session_id);
     let titles_file = format!("/tmp/devorch-iterm-titles-{}.json", session_id);
+    let startup_payload = ItermStartupPayload {
+        commands: startup_by_role,
+        layout,
+    };
     std::fs::write(
         &startup_file,
-        serde_json::to_string(startup_by_role).context("serialize startup commands")?,
+        serde_json::to_string(&startup_payload).context("serialize startup commands and layout")?,
     )?;
     std::fs::write(
         &titles_file,
@@ -1795,11 +1819,12 @@ async fn create_iterm_layout(
     let map: std::collections::HashMap<String, String> = serde_json::from_str(stdout.trim())
         .with_context(|| format!("iterm_launch.py returned invalid JSON: {}", stdout.trim()))?;
 
-    // Verify we got at least 10 sessions
-    if map.len() < 10 {
+    // Verify we got exactly the number of sessions this pattern's layout expects.
+    if map.len() != expected_panes {
         anyhow::bail!(
-            "iterm_launch.py returned only {} sessions (expected 10): {:?}",
+            "iterm_launch.py returned {} sessions (expected {}): {:?}",
             map.len(),
+            expected_panes,
             map
         );
     }

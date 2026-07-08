@@ -244,7 +244,7 @@ async def main(
     app = await iterm2.async_get_app(connection)
     for role, session in role_to_session.items():
         title = titles_by_role.get(role, role.upper())
-        color = tuple(ROLE_COLOR_HINTS.get(role, (40, 40, 40)))
+        color = role_color(role)
         appearance_tasks.append(inject_one_pane(
             app, role, session, title, color, startup_by_role.get(role)
         ))
@@ -259,15 +259,44 @@ async def main(
     print(json.dumps(result))
 
 
-# Best-effort color hints for roles this script knows about; anything else
-# falls back to a neutral gray. Actual per-pane background color/theming is
-# driven by the caller via ROLE_COLOR_HINTS overrides in future patterns —
-# today's callers (Simple Orchestrator) don't rely on this for correctness,
-# only cosmetics, since the Rust side already themes panes via startup banner.
+# Fixed color hints for the named roles this script knows about.
 ROLE_COLOR_HINTS: dict[str, tuple[int, int, int]] = {
     "orch": (30, 32, 35),
     "inp": (45, 45, 45),
+    "executor": (30, 32, 35),
+    "advisor": (45, 27, 83),
+    "fixer": (62, 49, 0),
 }
+
+# Distinct background tints cycled across worker-1..worker-10 so each worker
+# pane is visually distinguishable at a glance (same dark-tinted style as the
+# team grid's palette).
+WORKER_PALETTE: list[tuple[int, int, int]] = [
+    (62, 49, 0),   # amber
+    (45, 27, 83),  # purple
+    (7, 57, 25),   # green
+    (78, 24, 24),  # red
+    (0, 53, 58),   # teal
+    (70, 28, 0),   # orange
+    (0, 17, 51),   # navy
+    (80, 0, 80),   # magenta
+    (40, 60, 0),   # olive
+    (0, 45, 75),   # azure
+]
+
+
+def role_color(role: str) -> tuple[int, int, int]:
+    """Fixed hint for named roles; distinct palette entry per worker index;
+    neutral gray for anything else."""
+    if role in ROLE_COLOR_HINTS:
+        return ROLE_COLOR_HINTS[role]
+    if role.startswith("worker-"):
+        try:
+            idx = int(role.split("-", 1)[1]) - 1
+        except ValueError:
+            idx = 0
+        return WORKER_PALETTE[idx % len(WORKER_PALETTE)]
+    return (40, 40, 40)
 
 
 if __name__ == "__main__":

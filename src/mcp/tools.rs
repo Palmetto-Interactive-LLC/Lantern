@@ -888,12 +888,22 @@ pub async fn handle_get_setup_instructions(
     }
     let parsed: Args = serde_json::from_value(args)?;
 
-    // Pattern-aware instructions: DEVORCH_PATTERN is exported to every pane by
-    // startwork (see startwork::launch_executor's base_window_env call). Only
-    // the `executor` pattern has bespoke prompt text today (advisor-timing
-    // for `executor`, quiet-advisor rules for `advisor`); other patterns fall
-    // through to the legacy orchestrator/worker instructions below.
+    // Pattern-aware instructions: non-team `LaunchPattern`s (see
+    // `startwork::patterns::LaunchPattern`) get their own prompt content from
+    // `crate::prompts`, keyed off `DEVORCH_PATTERN` (exported to every pane by
+    // `startwork::launch`). Team stays on the inline prompts below, unchanged.
     let pattern = std::env::var("DEVORCH_PATTERN").unwrap_or_default();
+    if pattern == "simple" {
+        return Ok(json!({
+            "status": "ok",
+            "instructions": crate::prompts::simple::instructions(
+                &parsed.role,
+                &parsed.agent,
+                &parsed.session,
+            )
+        }));
+    }
+
     let instructions = if pattern == "executor" && parsed.role == "executor" {
         crate::prompts::executor::executor_instructions(&parsed.session, &parsed.agent)
     } else if pattern == "executor" && parsed.role == "advisor" {

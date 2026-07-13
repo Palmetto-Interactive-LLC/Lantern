@@ -8,16 +8,16 @@
 
 /// Resolved context for the issue a `fixbug` session is targeting. `title`/
 /// `body`/`url` are `None` when resolution failed (network error, unknown
-/// id, `gh`/`bd` not available, etc.) — in that case `resolution_note`
+/// id, GitHub CLI unavailable, or an opaque Linear issue key) — in that case `resolution_note`
 /// explains what was tried so the fixer knows to look the issue up itself.
 #[derive(Debug, Clone, Default)]
 pub struct IssueContext {
-    /// The raw `--issue` value as given on the CLI (number, URL, or `bd-*` id).
+    /// The raw `--issue` value as given on the CLI (Linear issue key, number, or URL).
     pub raw_ref: String,
     pub title: Option<String>,
     pub body: Option<String>,
     pub url: Option<String>,
-    /// Set when automatic resolution via `gh`/`bd` failed; explains why.
+    /// Set when automatic resolution was not available; explains why.
     pub resolution_note: Option<String>,
 }
 
@@ -42,7 +42,7 @@ pub fn kickoff_instructions(issue: &IssueContext, branch: &str, repo_id: &str) -
                 .unwrap_or("no resolution was attempted");
             format!(
                 "Issue reference: {raw} (could not auto-resolve title/body: {note}).\n\
-                 Look it up yourself before proceeding — try `gh issue view {raw}` or `bd show {raw}`.",
+                 Look it up in Linear before proceeding; GitHub issue references can be fetched with `gh issue view {raw}`.",
                 raw = issue.raw_ref
             )
         }
@@ -54,8 +54,8 @@ pub fn kickoff_instructions(issue: &IssueContext, branch: &str, repo_id: &str) -
          through review — do not stop at \"PR opened\".\n\n\
          {issue_block}\n\n\
          Workflow:\n\
-         1. FETCH AND READ: re-fetch the issue yourself if anything above is thin (`gh issue view` \
-            for a GitHub issue, `bd show` for a beads id) — get the full title, body, and any \
+         1. FETCH AND READ: open the linked Linear issue yourself if anything above is thin; for a \
+            GitHub issue reference, use `gh issue view` — get the full title, body, and any \
             comments before you touch code.\n\
          2. EXPLORE FIRST: read the affected files and their callers/tests before editing. Do not \
             guess at a fix from the issue text alone — reproduce or trace the bug in the code.\n\
@@ -103,13 +103,16 @@ mod tests {
     #[test]
     fn unresolved_issue_falls_back_to_raw_ref_with_note() {
         let issue = IssueContext {
-            raw_ref: "bd-99".to_string(),
-            resolution_note: Some("bd show exited non-zero".to_string()),
+            raw_ref: "PAL-99".to_string(),
+            resolution_note: Some(
+                "Linear issue references are intentionally passed through without local resolution"
+                    .to_string(),
+            ),
             ..Default::default()
         };
-        let text = kickoff_instructions(&issue, "proj-fix-bd-99-1", "proj");
-        assert!(text.contains("bd-99"));
-        assert!(text.contains("bd show exited non-zero"));
+        let text = kickoff_instructions(&issue, "proj-fix-pal-99-1", "proj");
+        assert!(text.contains("PAL-99"));
+        assert!(text.contains("Linear issue references are intentionally passed through"));
         assert!(text.contains("could not auto-resolve"));
     }
 }

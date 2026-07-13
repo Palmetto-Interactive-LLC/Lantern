@@ -11,7 +11,7 @@ Lantern is for developers and operators who want repeatable local multi-agent de
 
 ## Project Status
 
-Lantern is usable for Palmetto-style local agent squads and is still evolving as an OSS project. The stable surface is the CLI, installer, local state model, and documented iTerm2 workflow. The ACP/Goose and Beads runtime re-platforming work is experimental and tracked in Beads.
+Lantern is usable for Palmetto-style local agent squads and is still evolving as an OSS project. The stable surface is the CLI, installer, local state model, and documented iTerm2 workflow. ACP/Goose runtime work is experimental; planning and delivery are tracked in Linear.
 
 See [ROADMAP.md](ROADMAP.md) for the stable/experimental boundary and near-term priorities.
 

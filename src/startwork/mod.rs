@@ -1535,8 +1535,8 @@ finally:
 ///   keyring enabled. The provider stays `claude-acp` — the only zero-credential
 ///   path (rides the Claude Code CLI subscription; no API key, matching this
 ///   repo's no-secrets model).
-/// - beads is available via the shell. `stopwork` closes the window and removes
-///   the worktree/branch.
+/// - Work is coordinated through Linear; `stopwork` closes the window and
+///   removes the worktree/branch.
 #[allow(clippy::too_many_arguments)]
 async fn launch_solo_goose(
     repo: &Path,
@@ -1605,7 +1605,7 @@ async fn launch_solo_goose(
 
     println!("\nSolo goose window opened for session '{session_id}'.");
     println!("Talk to it directly — single full-featured goose session for focused fixes.");
-    println!("Inspect: `lantern status` · beads `bd ready` · stop: `stopwork {session_id}`");
+    println!("Inspect: `lantern status` · Linear · stop: `stopwork {session_id}`");
     Ok(())
 }
 

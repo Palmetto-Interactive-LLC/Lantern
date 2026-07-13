@@ -8,13 +8,13 @@ body:
   - type: markdown
     attributes:
       value: |
-        **Type:** Epic. Mirrors Beads `epic`.
+        **Type:** Epic. Triaged work is planned as a Linear project with child issues.
         Use this when the work should break down into multiple child items.
   - type: dropdown
     id: item_type
     attributes:
       label: Item type
-      description: Keep this aligned with the GitHub label and Beads type.
+      description: Keep this aligned with the GitHub label and Linear project.
       options:
         - Epic
     validations:
@@ -24,7 +24,7 @@ body:
     attributes:
       label: Pre-flight
       options:
-        - label: I searched existing GitHub issues and Beads before filing.
+        - label: I searched existing GitHub issues and Linear before filing.
           required: true
   - type: textarea
     id: mission
@@ -77,6 +77,6 @@ body:
     id: context
     attributes:
       label: Additional context
-      description: Add links, constraints, related Beads IDs, or GitHub issues.
+      description: Add links, constraints, related Linear issues, or GitHub issues.
     validations:
       required: false

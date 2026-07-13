@@ -8,13 +8,13 @@ body:
   - type: markdown
     attributes:
       value: |
-        **Type:** Bug. Mirrors Beads `bug`.
+        **Type:** Bug. Accepted work is tracked in Linear.
         Use this only for a reproducible defect in existing behavior.
   - type: dropdown
     id: item_type
     attributes:
       label: Item type
-      description: Keep this aligned with the GitHub label and Beads type.
+      description: Keep this aligned with the GitHub label and linked Linear issue.
       options:
         - Bug
     validations:
@@ -25,7 +25,7 @@ body:
       label: Pre-flight
       description: Confirm this is not already tracked.
       options:
-        - label: I searched existing GitHub issues and Beads before filing.
+        - label: I searched existing GitHub issues and Linear before filing.
           required: true
   - type: textarea
     id: summary
@@ -96,6 +96,6 @@ body:
     id: context
     attributes:
       label: Additional context
-      description: Add links, suspected cause, or related Beads/GitHub issue IDs.
+      description: Add links, suspected cause, or related Linear/GitHub issue IDs.
     validations:
       required: false

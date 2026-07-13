@@ -97,7 +97,6 @@ jobs:
             --config p/security-audit \
             --metrics=off \
             --error \
-            --exclude .beads \
             --exclude .git \
             --exclude node_modules \
             --exclude dist \
@@ -158,7 +157,6 @@ jobs:
           package_sources=$(
             find . \
               -path ./.git -prune -o \
-              -path ./.beads -prune -o \
               -path ./node_modules -prune -o \
               \( \
                 -name package-lock.json -o \
@@ -227,7 +225,6 @@ jobs:
             --scanners vuln,secret,misconfig \
             --severity HIGH,CRITICAL \
             --exit-code 1 \
-            --skip-dirs .beads \
             --skip-dirs .git \
             --skip-dirs node_modules \
             --format sarif \
@@ -244,7 +241,6 @@ jobs:
           checkov -d . \
             --quiet \
             --compact \
-            --skip-path .beads \
             --skip-path .git \
             --skip-path node_modules \
             --output cli \

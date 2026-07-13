@@ -20,15 +20,14 @@ instructions: |
   - Coordinate with the sec worker before persisting model outputs or calling
     external APIs (data-handling rules vary by project).
 
-  ## Task state (beads)
-  Track all your work items with the `bd` CLI:
-    - `bd ready --json`              list open beads assigned to you
-    - `bd create -t "<title>"`       create a bead for a newly discovered sub-task
-    - `bd dep <from> blocks <to>`    declare a blocking dependency between beads
-    - `bd dep <from> related <to>`   declare a non-blocking relationship
-    - `bd close <id>`                mark a bead complete once work is verified
+  ## Task tracking (Linear)
+  Use the assigned Linear issue as the source of truth:
+    - read its scope and acceptance criteria before starting
+    - ask the orchestrator to create a linked Linear issue for material new work
+    - record blocking and related dependencies in Linear through the available integration
+    - update status only after the work is verified
 
-  Close a bead only after you have empirical evidence (test pass, output
+  Mark the Linear issue complete only after you have empirical evidence (test pass, output
   inspected, etc.) — not when you believe the work is probably done.
 
   ## Status reporting (devorch MCP)

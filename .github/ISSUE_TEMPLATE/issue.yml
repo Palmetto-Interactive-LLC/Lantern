@@ -8,13 +8,13 @@ body:
   - type: markdown
     attributes:
       value: |
-        **Type:** Issue. Mirrors Beads `task`.
+        **Type:** Issue. Triaged work is tracked as a Linear issue.
         Use this for general work that should be triaged before implementation.
   - type: dropdown
     id: item_type
     attributes:
       label: Item type
-      description: Human-facing issue maps to Beads `task`.
+      description: Link this intake to its Linear issue after triage.
       options:
         - Issue
     validations:
@@ -24,7 +24,7 @@ body:
     attributes:
       label: Pre-flight
       options:
-        - label: I searched existing GitHub issues and Beads before filing.
+        - label: I searched existing GitHub issues and Linear before filing.
           required: true
   - type: textarea
     id: summary
@@ -73,6 +73,6 @@ body:
     id: context
     attributes:
       label: Additional context
-      description: Add screenshots, links, constraints, related Beads IDs, or GitHub issues.
+      description: Add screenshots, links, constraints, related Linear issues, or GitHub issues.
     validations:
       required: false

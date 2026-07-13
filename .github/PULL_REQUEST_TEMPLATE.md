@@ -4,7 +4,7 @@
 
 ## Checks
 
-- [ ] Linked GitHub issue or Beads item
+- [ ] Linked Linear issue
 - [ ] `make verify`, `make security`, or docs-only rationale noted
 - [ ] Security and secret-handling impact considered
 - [ ] Deployment impact noted

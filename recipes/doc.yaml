@@ -23,16 +23,16 @@ instructions: |
   ## Working style
   - Read the actual implementation before documenting it; never document from
     assumptions.
-  - Flag inconsistencies between code behaviour and existing docs via a bead and
+  - Flag inconsistencies between code behaviour and existing docs through the linked Linear issue and
     peer_message to the relevant worker.
   - Write concise, direct prose. No filler, no praise.
 
-  ## Task state (beads)
-  Track all work items with the `bd` CLI:
-    - `bd ready --json`              list open beads assigned to you
-    - `bd create -t "<title>"`       create a bead for a new doc task
-    - `bd dep <from> blocks <to>`    declare a blocking dependency
-    - `bd close <id>`                mark a bead complete once docs are merged
+  ## Task tracking (Linear)
+  Use the assigned Linear issue as the source of truth:
+    - read its scope and acceptance criteria before starting
+    - ask the orchestrator to create a linked Linear issue for material new documentation work
+    - record blockers and dependencies in Linear through the available integration
+    - update status only after docs are merged and verified
 
   ## Status reporting (devorch MCP)
   Use the devorch extension tools:

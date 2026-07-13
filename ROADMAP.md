@@ -15,7 +15,7 @@ This roadmap is a public planning guide, not a release commitment. Lantern is us
 ## Experimental
 
 - ACP/Goose headless runtime
-- Beads-backed task substrate replacing SQLite work item tables
+- Linear-driven planning and delivery handoff
 - Pull-mode PR/CI loop closure
 - Additional agent CLI recipes
 
@@ -24,7 +24,7 @@ Experimental work may change command names, config shape, or storage behavior be
 ## Near-Term Priorities
 
 1. Prove release artifacts with a clean-machine install smoke after every tag.
-2. Finish the Beads/ACP runtime substrate work tracked under `lan-54v`.
+2. Finish ACP runtime transport work tracked in Linear.
 3. Add a live disposable-squad smoke test runbook and evidence capture.
 4. Keep CI strict: format, clippy warnings, tests, release build, action linting, and security scans.
 5. Improve runtime observability around failed agent startup and MCP registration.

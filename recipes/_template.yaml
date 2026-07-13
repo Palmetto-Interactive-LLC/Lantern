@@ -53,12 +53,12 @@ instructions: |
 
   Replace these instructions with the role mandate.
 
-  ## Task state (beads)
-  Use the `bd` CLI to track task state throughout your work:
-    - `bd ready --json`            list open beads assigned to you
-    - `bd create -t "<title>"`     create a new bead for a sub-task you discover
-    - `bd dep <from> blocks <to>`  declare a blocking dependency
-    - `bd close <id>`              mark a bead done when its work is verified
+  ## Task tracking (Linear)
+  Use the assigned Linear issue as the source of truth throughout your work:
+    - read the issue scope and acceptance criteria before changing code
+    - ask the orchestrator to create a linked Linear issue for material new work
+    - record blockers and dependencies in Linear through the available integration
+    - update the issue only after the work is verified
 
   ## Status reporting (devorch MCP)
   The devorch MCP server is available as the "devorch" extension. Use its tools to:

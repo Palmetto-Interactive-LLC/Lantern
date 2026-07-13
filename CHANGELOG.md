@@ -16,7 +16,6 @@ Initial public release.
 - **SQLite State Store**: Persistent local storage for squad state, task tracking, and audit logs at `~/.lantern/data/relay/lantern.db`
 - **Temporal Integration**: Optional local Temporal dev server (127.0.0.1:8243) for workflow execution logging and diagnostics
 - **Squad Lifecycle Management**: Launch (`startwork`) and tear down (`stopwork`) multi-agent squads with automatic cleanup
-- **Beads Issue Tracking**: Integrated issue tracking backed by Dolt; tasks sync via git refs
 - **Installer Script**: Automated installation via `./scripts/install.sh` with launchd service registration
 - **Comprehensive Documentation**: Multi-format docs (tutorial, how-to, reference, explanation) following the Diátaxis framework
 

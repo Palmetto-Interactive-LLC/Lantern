@@ -131,31 +131,20 @@ git push origin your-branch
 
 Use GitHub's configured squash merge path. The ruleset enforces signed commits and linear history.
 
-## Issue Tracking with Beads
+## Issue Tracking with Linear
 
-This repository uses [Beads](https://github.com/gastownhall/beads) (`bd`) for issue tracking.
-
-### Key Commands
-
-```bash
-bd prime                    # View full workflow context and available commands
-bd ready                    # List available work items
-bd show <id>               # View a specific issue
-bd update <id> --claim     # Claim an issue for yourself
-bd close <id>              # Complete and close an issue
-bd remember <key> <value>  # Store persistent knowledge about the project
-```
+Linear is the source of truth for Lantern planning and delivery: [Palmetto Interactive Linear](https://linear.app/palmetto-interactive). GitHub issues are intake or public discussion; implementation work must be linked to a Linear issue.
 
 ### Workflow
 
-1. **Find work**: `bd ready` shows available tasks
-2. **Claim it**: `bd update <id> --claim` to mark yourself as working on it
-3. **Implement**: Create a branch and commit your changes
-4. **Test locally**: Run all build/test gates before pushing
-5. **Push and PR**: Open a PR with your branch
-6. **Close**: Once merged, run `bd close <id>` to mark complete
+1. **Find or create the Linear issue**: Make sure the work has clear scope, acceptance criteria, and ownership.
+2. **Mark it in progress**: Record dependencies and material blockers in Linear before implementation begins.
+3. **Implement**: Create a branch and commit scoped changes.
+4. **Test locally**: Run all repository build and test gates before pushing.
+5. **Push and PR**: Open a PR linked to the Linear issue.
+6. **Close only with evidence**: After the PR is merged and verified, update the Linear issue with the delivery evidence and move it to Done.
 
-Issues live in a local Dolt database and sync via `refs/dolt/data` on your git remote. See [Beads SYNC concepts](https://github.com/gastownhall/beads/blob/main/docs/SYNC_CONCEPTS.md) for details.
+Do not create local tracker data, hooks, or synchronization state. Do not put secrets, vulnerability details, customer data, or private incident notes in public GitHub issues. Use private security advisories for vulnerability reports.
 
 ## Documentation
 

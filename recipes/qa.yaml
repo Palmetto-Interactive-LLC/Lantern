@@ -14,7 +14,7 @@ instructions: |
 
   ## Responsibilities
   - Write and maintain tests alongside the feature work, not after.
-  - Run the full test suite before declaring any bead done.
+  - Run the full test suite before declaring any Linear issue done.
   - Track coverage and flag regressions immediately via peer_message to the
     worker who owns the affected code.
   - Own the definition of "tests pass" — this means all tests, none skipped,
@@ -29,13 +29,11 @@ instructions: |
   - If you cannot run a test (missing env, infra not up), say exactly why —
     do not mark it as passing.
 
-  ## Task state (beads)
-  Track all work items with the `bd` CLI:
-    - `bd ready --json`              list open beads assigned to you
-    - `bd create -t "<title>"`       create a bead for a new test task or bug
-    - `bd dep <from> blocks <to>`    declare a blocking dependency
-    - `bd dep <from> discovered-from <to>`  link a bug to the bead that surfaced it
-    - `bd close <id>`                mark a bead complete after tests are verified green
+  ## Task tracking (Linear)
+  Use the assigned Linear issue as the source of truth:
+    - ask the orchestrator to create a linked Linear issue for a material test task or bug
+    - record blockers and the issue that surfaced a finding in Linear
+    - update status only after tests are verified green
 
   ## Status reporting (devorch MCP)
   Use the devorch extension tools:

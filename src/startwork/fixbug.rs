@@ -1,8 +1,8 @@
 //! `--pattern fixbug` launch: one fixer worktree pane + an input router pane.
 //!
-//! Resolves the `--issue` reference (plain number, GitHub issue URL, or
-//! beads `bd-*` id) to a title/body/url via `gh issue view` or `bd show`,
-//! then opens a fixer worktree named `<project>-fix-<issue>-<slot>` and
+//! Resolves the `--issue` reference (a Linear issue identifier, plain number,
+//! or GitHub issue URL) to the context available locally, then opens a fixer
+//! worktree named `<project>-fix-<issue>-<slot>` and
 //! injects the kickoff prompt from `crate::prompts::fixbug` directly into
 //! the fixer's launch command.
 //!
@@ -33,11 +33,14 @@ const DEVORCH_DEFAULT_TASK_QUEUE: &str = "lantern-devorch";
 pub async fn resolve_issue(issue_ref: &str) -> IssueContext {
     let trimmed = issue_ref.trim();
 
-    if let Some(id) = trimmed
-        .strip_prefix("bd-")
-        .or_else(|| trimmed.strip_prefix("BD-"))
-    {
-        return resolve_beads(trimmed, id).await;
+    if is_linear_issue_identifier(trimmed) {
+        return IssueContext {
+            raw_ref: trimmed.to_string(),
+            resolution_note: Some(
+                "Linear issue references are intentionally passed through without local resolution; open the linked Linear issue before proceeding.".to_string(),
+            ),
+            ..Default::default()
+        };
     }
 
     if let Some(number) = extract_github_issue_number(trimmed) {
@@ -47,10 +50,27 @@ pub async fn resolve_issue(issue_ref: &str) -> IssueContext {
     IssueContext {
         raw_ref: trimmed.to_string(),
         resolution_note: Some(
-            "not a GitHub issue number/URL or a bd-* id; skipped auto-resolution".to_string(),
+            "not a Linear issue identifier or GitHub issue number/URL; skipped auto-resolution"
+                .to_string(),
         ),
         ..Default::default()
     }
+}
+
+/// Return true for a Linear issue identifier such as `PAL-123`.
+///
+/// Linear remains the task-system authority. Lantern deliberately preserves
+/// the key as opaque context instead of introducing a second client or a local
+/// issue cache.
+fn is_linear_issue_identifier(s: &str) -> bool {
+    let Some((team, number)) = s.rsplit_once('-') else {
+        return false;
+    };
+
+    !team.is_empty()
+        && team.chars().all(|c| c.is_ascii_alphanumeric())
+        && !number.is_empty()
+        && number.chars().all(|c| c.is_ascii_digit())
 }
 
 /// Pull the trailing issue number out of a plain number or a
@@ -108,49 +128,11 @@ async fn resolve_github(raw_ref: &str, number: &str) -> IssueContext {
     }
 }
 
-async fn resolve_beads(raw_ref: &str, id: &str) -> IssueContext {
-    let bd_id = format!("bd-{id}");
-    let output = Command::new("bd").args(["show", &bd_id]).output().await;
-
-    match output {
-        Ok(out) if out.status.success() => {
-            let text = String::from_utf8_lossy(&out.stdout).trim().to_string();
-            let title = text.lines().next().map(|s| s.trim().to_string());
-            IssueContext {
-                raw_ref: raw_ref.to_string(),
-                title,
-                body: Some(text),
-                url: None,
-                resolution_note: None,
-            }
-        }
-        Ok(out) => IssueContext {
-            raw_ref: raw_ref.to_string(),
-            resolution_note: Some(format!(
-                "bd show {bd_id} failed: {}",
-                String::from_utf8_lossy(&out.stderr).trim()
-            )),
-            ..Default::default()
-        },
-        Err(e) => IssueContext {
-            raw_ref: raw_ref.to_string(),
-            resolution_note: Some(format!("failed to run bd show {bd_id}: {e}")),
-            ..Default::default()
-        },
-    }
-}
-
 /// Turn a raw `--issue` reference into a short filesystem/branch-safe slug
-/// for `<project>-fix-<issue>-<slot>` — prefers the bare issue/bd number so
+/// for `<project>-fix-<issue>-<slot>` — prefers the bare GitHub issue number so
 /// a GitHub URL doesn't blow up the branch name.
 fn branch_slug(raw_ref: &str) -> String {
     let trimmed = raw_ref.trim();
-    if let Some(id) = trimmed
-        .strip_prefix("bd-")
-        .or_else(|| trimmed.strip_prefix("BD-"))
-    {
-        return format!("bd-{}", issue_slug(id));
-    }
     if let Some(number) = extract_github_issue_number(trimmed) {
         return issue_slug(&number);
     }
@@ -463,13 +445,21 @@ mod tests {
             extract_github_issue_number("https://github.com/org/repo/issues/123"),
             Some("123".to_string())
         );
-        assert_eq!(extract_github_issue_number("bd-99"), None);
+        assert_eq!(extract_github_issue_number("PAL-123"), None);
+    }
+
+    #[test]
+    fn linear_issue_identifiers_are_accepted_as_opaque_context() {
+        assert!(is_linear_issue_identifier("PAL-123"));
+        assert!(is_linear_issue_identifier("LANTERN-1"));
+        assert!(!is_linear_issue_identifier("123"));
+        assert!(!is_linear_issue_identifier("PAL-"));
     }
 
     #[test]
     fn branch_slug_prefers_bare_number_over_full_url() {
         assert_eq!(branch_slug("https://github.com/org/repo/issues/123"), "123");
         assert_eq!(branch_slug("42"), "42");
-        assert_eq!(branch_slug("bd-99"), "bd-99");
+        assert_eq!(branch_slug("PAL-123"), "pal-123");
     }
 }

@@ -14,7 +14,7 @@ The repository was audited for secrets, credentials, and sensitive/proprietary c
 
 **Zero secrets or credentials were found** — by four independent automated scanners and nine manual ripgrep pattern sweeps. The repository's standing claim of "no secrets, no credentials" is **substantiated by evidence**, not assumed.
 
-Five findings were surfaced. The one material item (proprietary license on a repo intended for public release) is **RESOLVED** — the project now ships under **Apache-2.0** with a matching `Cargo.toml` field and README notice. The remaining four are **LOW/INFO accepted residuals** with no data-exposure risk. **No git history rewrite is required.**
+Four findings were surfaced. The one material item (proprietary license on a repo intended for public release) is **RESOLVED** — the project now ships under **Apache-2.0** with a matching `Cargo.toml` field and README notice. The remaining three are **LOW/INFO accepted residuals** with no data-exposure risk. **No git history rewrite is required.**
 
 A full public-OSS documentation and GitHub-hardening package has been applied (license, SECURITY.md, CONTRIBUTING.md, CODE_OF_CONDUCT.md, CHANGELOG.md, .env.example; branch protection, secret scanning + push protection, Dependabot, SHA-pinned CodeQL/CI). A post-change re-sweep on the integrated tree confirmed it is **still clean**.
 
@@ -68,16 +68,15 @@ All scans were executed with exact, reproducible commands. Scanner versions: git
 | ID | Finding | File / Path | Severity | Exposure risk | Status / Remediation | History rewrite |
 |----|---------|-------------|----------|---------------|----------------------|-----------------|
 | **F1** | Proprietary license on a repo intended for public release | `README.md`, `LICENSE`, `Cargo.toml` | ~~MEDIUM~~ → **RESOLVED** | None (legal contradiction, not a data leak) | **RESOLVED — relicensed Apache-2.0**: `LICENSE` (full Apache 2.0, 204 lines), `Cargo.toml:7 license = "Apache-2.0"`, `README.md:173` Apache-2.0 notice | N |
-| **F2** | Local SSH host alias `github-palmetto` | `CLAUDE.md:75-76`; `.beads/config.yaml:68` | **LOW** | Leaks the owner's personal `~/.ssh` host-alias naming; non-functional for the public (they lack the alias) but reveals nothing secret | **ACCEPTED RESIDUAL** — left intentionally: it is accurate machine documentation, and the owner's standing policy is SSH-alias-first; rewriting it to `git@github.com` would break their push/sync. Cosmetic only. | N |
-| **F3** | Developer name "Matt Lucas" in tracker audit log | `.beads/interactions.jsonl` (4 status-change records) | **INFO** | None — name is already public via git commit authorship; records contain only `status` field changes, no titles/descriptions/comments | **ACCEPTED RESIDUAL** — no action; optionally drop `.beads/interactions.jsonl` from the public export if desired | N |
+| **F2** | Local SSH host alias `github-palmetto` | `CLAUDE.md` | **LOW** | Leaks the owner's personal `~/.ssh` host-alias naming; non-functional for the public (they lack the alias) but reveals nothing secret | **ACCEPTED RESIDUAL** — left intentionally: it is accurate machine documentation, and the owner's standing policy is SSH-alias-first; rewriting it to `git@github.com` would break their push path. Cosmetic only. | N |
 | **F4** | Org name `Palmetto-Interactive-LLC` in GitHub URLs | `README.md`, `CLAUDE.md`, docs | **INFO** | None — the repository's own identity; unavoidable and non-sensitive | No action | N |
 | **F5** | Test fixture email `t@t.co` | `src/stopwork/mod.rs:339,400` | **INFO** | None — generic placeholder used by hermetic git unit tests | No action | N |
 
 **Positive controls confirmed:**
-- `.gitignore` correctly excludes credential-risk artifacts: `.env`/`.envrc`/`*.env` (allowing `.env.example`), `.cloud-context`, `*.db`, `.beads-credential-key`, `.beads/proxieddb/`.
+- `.gitignore` correctly excludes credential-risk artifacts: `.env`/`.envrc`/`*.env` (allowing `.env.example`), `.cloud-context`, and `*.db`.
 - **No** tracked `.env` / `.pem` / `.key` / `credentials` files anywhere in the tree or history.
 - All external URLs resolve to public destinations only: crates.io index, `127.0.0.1:8243/8244` (local Temporal), public github.com, docs.temporal.io, diataxis.fr, sh.rustup.rs, iterm2.com.
-- Editor/agent hooks (`.codex/hooks.json`) invoke only `bd …`; `.agents/skills/.../openai.yaml` contains no credential strings.
+- No repository-local agent hook commands are configured.
 
 ---
 
@@ -90,7 +89,7 @@ All scans were executed with exact, reproducible commands. Scanner versions: git
 
 **Public OSS documentation:**
 - `SECURITY.md` — vulnerability disclosure policy.
-- `CONTRIBUTING.md` — dev setup (cargo build/test, install.sh), build gates (`cargo fmt --check`, clippy, test), branch/PR workflow, conventional commits, beads (`bd`) workflow.
+- `CONTRIBUTING.md` — dev setup (cargo build/test, install.sh), build gates (`cargo fmt --check`, clippy, test), branch/PR workflow, conventional commits, and Linear workflow.
 - `CODE_OF_CONDUCT.md` — contributor code of conduct.
 - `CHANGELOG.md` — change history.
 - `.env.example` — documents the (none-required) env approach with a single commented example; no real values.
@@ -103,8 +102,7 @@ All scans were executed with exact, reproducible commands. Scanner versions: git
 
 | Risk | Severity | Disposition |
 |------|----------|-------------|
-| **F2** — `github-palmetto` SSH alias in `CLAUDE.md` / `.beads/config.yaml` | LOW | **Accepted residual.** Machine-config detail, not a secret; rewriting would break the owner's git workflow. |
-| **F3** — Developer name in `.beads/interactions.jsonl` | INFO | **Accepted residual.** Already public via commit authorship; no sensitive content. |
+| **F2** — `github-palmetto` SSH alias in `CLAUDE.md` | LOW | **Accepted residual.** Machine-config detail, not a secret; rewriting would break the owner's git workflow. |
 | **RUSTSEC-2023-0071** — `rsa` 0.9.10 "Marvin Attack" timing sidechannel, reachable via `sqlx-mysql` | MEDIUM (CVSS 5.9) | **Accepted with justification.** Flagged by qa's `cargo audit`. **No upstream fix is available.** The vulnerable code path is the **MySQL** driver's RSA handshake; **Lantern uses SQLite exclusively** (`sqlite://` connection strings only — no MySQL backend is configured or compiled into a runtime path that performs RSA). The `rsa` crate enters the dependency graph transitively through `sqlx-mysql` but is **not exercised at runtime**. Recommendation: document as an accepted risk **and** add a `cargo audit` ignore with this justification (e.g. `.cargo/audit.toml` → `[advisories] ignore = ["RUSTSEC-2023-0071"]` with a comment), and/or trim the `sqlx` MySQL feature if not needed, so CI's audit gate stays green without masking new advisories. Re-evaluate when an upstream `rsa` fix ships. |
 
 No other unresolved risks. No customer data, financials, internal infrastructure, or proprietary strategy is exposed.
@@ -117,7 +115,7 @@ No other unresolved risks. No customer data, financials, internal infrastructure
 
 - gitleaks scanned the **full 19-commit history** (`gitleaks git .`) → no leaks.
 - trufflehog scanned the **full git history** → 0 verified / 0 unverified.
-- None of F1–F5 involves a secret committed in the past; F1 was a current-tree license string (now changed forward), and F2–F5 are non-secret current-tree content.
+- None of the findings involves a secret committed in the past; F1 was a current-tree license string (now changed forward), and the remaining findings are non-secret current-tree content.
 - **No `git filter-repo` / BFG / force-push operation is required** for public release.
 
 ---
@@ -161,7 +159,7 @@ No other unresolved risks. No customer data, financials, internal infrastructure
 1. **No secrets, full history.** Four independent scanners (gitleaks tree + history, trufflehog fs + git) and nine ripgrep sweeps returned **zero** credentials across the current tree **and** the complete 19-commit history. The "no secrets" claim is proven, not assumed.
 2. **No history rewrite required.** History is clean; the flip to public can proceed without any force-push surgery.
 3. **The one material finding is resolved.** The license contradiction (F1) is fixed — Apache-2.0 across `LICENSE`, `Cargo.toml`, and `README.md`.
-4. **Residual findings are LOW/INFO with no data-exposure risk** (F2 SSH alias, F3 dev name, F4 org name, F5 test email) and are formally accepted.
+4. **Residual findings are LOW/INFO with no data-exposure risk** (F2 SSH alias, F4 org name, F5 test email) and are formally accepted.
 5. **Public-OSS posture is complete** — license, SECURITY.md, CONTRIBUTING.md, CODE_OF_CONDUCT.md, CHANGELOG.md, .env.example, branch protection, secret scanning + push protection, Dependabot, and SHA-pinned CodeQL/CI.
 6. **Post-change re-sweep is clean** — the integrated tree was re-scanned after all doc/ops changes and remains free of secrets and local paths.
 

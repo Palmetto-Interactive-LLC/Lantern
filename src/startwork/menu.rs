@@ -174,7 +174,7 @@ fn resolve_interactive() -> Result<PatternConfig> {
         }
         3 => {
             let issue = Text::new("Issue reference:")
-                .with_help_message("GitHub issue number/URL, or a beads id (e.g. lan-abc)")
+                .with_help_message("Linear issue key (e.g. PAL-123), or GitHub issue number/URL")
                 .prompt()
                 .context("issue prompt cancelled")?;
             let fixer = select_model("Fixer model:", executor_model_menu())?;

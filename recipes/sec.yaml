@@ -19,7 +19,7 @@ instructions: |
     AGENTS.md and any .op-environment / .sops.yaml present).
   - Never print, echo, or log secret values. Inject via the project's declared
     mechanism (op run, sops exec-env, etc.).
-  - Maintain a threat model bead; update it when attack surface changes.
+  - Maintain a threat model Linear issue; update it when attack surface changes.
 
   ## Working style
   - Diagnose before fixing — understand root cause, not just symptoms.
@@ -27,13 +27,11 @@ instructions: |
   - When uncertain about a CVE severity or exploit path, say so explicitly.
   - A 403/auth error is a blocker: surface verbatim, do not improvise fallbacks.
 
-  ## Task state (beads)
-  Track all work items with the `bd` CLI:
-    - `bd ready --json`              list open beads assigned to you
-    - `bd create -t "<title>"`       create a bead for a newly discovered issue
-    - `bd dep <from> blocks <to>`    declare a blocking dependency between beads
-    - `bd dep <from> discovered-from <to>`  link a finding to the bead that surfaced it
-    - `bd close <id>`                mark a bead complete once remediation is verified
+  ## Task tracking (Linear)
+  Use the assigned Linear issue as the source of truth:
+    - ask the orchestrator to create a linked Linear issue for a newly discovered issue
+    - record blocking dependencies and the issue that surfaced a finding in Linear
+    - update status only after remediation is verified
 
   ## Status reporting (devorch MCP)
   Use the devorch extension tools:

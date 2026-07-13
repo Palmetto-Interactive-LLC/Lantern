@@ -220,7 +220,7 @@ pub async fn deliver_to_role_acp(
     // report through the devorch MCP and to act as the role specialist.
     let task = format!(
         "You are the {role} specialist worker running headless via Goose/ACP for session {session}. \
-         Use your {role} expertise and tools (including beads via `bd`) to complete the work below. \
+         Use your {role} expertise and the linked Linear issue to complete the work below. \
          When finished, call the `devorch_report_status` MCP tool with status \"complete\", the task id, \
          and a one-line summary plus validation. If you cannot proceed, call `devorch_blocker` with the \
          reason. Ignore any 'signal --status ...' CLI lines below — use the devorch MCP tools instead.\n\n{text}"

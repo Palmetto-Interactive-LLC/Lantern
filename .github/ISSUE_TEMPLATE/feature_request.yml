@@ -8,13 +8,13 @@ body:
   - type: markdown
     attributes:
       value: |
-        **Type:** Feature. Mirrors Beads `feature`.
+        **Type:** Feature. Accepted work is tracked in Linear.
         Use this for a new capability or meaningful behavior change.
   - type: dropdown
     id: item_type
     attributes:
       label: Item type
-      description: Keep this aligned with the GitHub label and Beads type.
+      description: Keep this aligned with the GitHub label and linked Linear issue.
       options:
         - Feature
     validations:
@@ -24,7 +24,7 @@ body:
     attributes:
       label: Pre-flight
       options:
-        - label: I searched existing GitHub issues and Beads before filing.
+        - label: I searched existing GitHub issues and Linear before filing.
           required: true
   - type: textarea
     id: problem
@@ -68,6 +68,6 @@ body:
     id: context
     attributes:
       label: Additional context
-      description: Add screenshots, links, constraints, or related Beads/GitHub issue IDs.
+      description: Add screenshots, links, constraints, or related Linear/GitHub issue IDs.
     validations:
       required: false

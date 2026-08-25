@@ -16,7 +16,7 @@ permissions:
 jobs:
   verify-tag:
     name: Verify signed tag
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, daytona]
     permissions:
       contents: read
     steps:
@@ -95,7 +95,7 @@ jobs:
   release:
     name: Publish release
     needs: build
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, daytona]
     permissions:
       contents: write
     steps:

@@ -11,7 +11,7 @@ permissions:
 jobs:
   refresh:
     name: refresh
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, daytona]
     permissions:
       contents: write
       pull-requests: write
